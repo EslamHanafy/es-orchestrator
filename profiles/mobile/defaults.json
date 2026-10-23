@@ -1,0 +1,17 @@
+{
+  "STACK_SUMMARY": "mobile app: offline-first local DB, state holders + repositories, design previews, localized UI",
+  "SRC_PATTERN": "^(lib|src|app)/.*\\.(dart|ts|tsx|js|jsx|kt|swift)$",
+  "MIGRATIONS_GLOB": "none",
+  "FN_MAX_LINES": 40,
+  "LIVE_CHECK": "device or simulator run in every language, large text scale, landscape and offline; NOT RUN reported explicitly when impossible",
+  "FORBIDDEN_RULES": [
+    "catch-all-typed|catch[[:space:]]*\\([[:space:]]*(_|e)[[:space:]]*\\)|on (Object|Exception)[[:space:]]",
+    "null-assert|[A-Za-z0-9_\\)\\]]![.;,)[:space:]]",
+    "copywith-style|TextStyle\\([^)]*\\)\\.copyWith|style\\.copyWith\\(",
+    "inline-route|MaterialPageRoute\\(|CupertinoPageRoute\\(",
+    "now-in-ui|DateTime\\.now\\(\\)|new Date\\(\\)",
+    "optional-di|isRegistered",
+    "preview-leak|preview_|PreviewHarness"
+  ],
+  "COMMENT_POLICY": "Comment only when the intent is not obvious from names and types; never narrate what the next line does."
+}

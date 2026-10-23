@@ -1,0 +1,2 @@
+# Ruled forbidden-pattern exceptions: path|rule|ruling (e.g. src/app/startup.ts|console|O-7 boot banner).
+# Only the orchestrator or a reviewer edits this file; an implementer never does.

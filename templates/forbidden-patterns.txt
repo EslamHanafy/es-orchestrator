@@ -1,0 +1,4 @@
+# Forbidden patterns in ADDED source lines: rule|awk regex. The profile lines below come from profiles/<stack>.
+# Add a rule whenever a review finds a defect class a regex can catch.
+todo|TODO|FIXME
+{{PROFILE_FORBIDDEN_RULES}}

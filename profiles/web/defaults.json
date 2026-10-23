@@ -1,0 +1,15 @@
+{
+  "STACK_SUMMARY": "web frontend: component framework, typed API services, shared components and style partials",
+  "SRC_PATTERN": "^(src|frontend/src|app|web/src)/.*\\.(ts|tsx|js|jsx|vue|svelte|html|scss)$",
+  "MIGRATIONS_GLOB": "none",
+  "FN_MAX_LINES": 40,
+  "COMMENT_POLICY": "Comment intent and non-obvious decisions (public APIs, complex logic); never narrate what the next line does.",
+  "LIVE_CHECK": "the changed pages exercised in a browser or a Playwright smoke suite, with screenshots/output saved in the run folder",
+  "FORBIDDEN_RULES": [
+    "inline-template|template:[[:space:]]*`|styles:[[:space:]]*\\[",
+    "any-type|:[[:space:]]*any([^A-Za-z]|$)|as any",
+    "detect-changes|detectChanges\\(\\)",
+    "nested-subscribe|subscribe\\([^)]*subscribe\\(",
+    "physical-css|margin-left|margin-right|padding-left|padding-right"
+  ]
+}

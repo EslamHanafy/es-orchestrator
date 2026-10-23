@@ -1,0 +1,2 @@
+# Ruled function-length exceptions: path:function|ruling (e.g. src/legacy/parser.ts:parseAll|P2-R14 generated table).
+# Only the orchestrator or a reviewer edits this file; an implementer never does.

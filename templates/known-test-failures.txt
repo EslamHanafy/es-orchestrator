@@ -1,0 +1,2 @@
+# Pre-existing test failures at the baseline (one test id per line, exactly as TEST_FAILURES_EXTRACT prints it).
+# Only the orchestrator edits this file, and each line cites the ruling or baseline that accepted it.
