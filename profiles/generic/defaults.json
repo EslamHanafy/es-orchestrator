@@ -6,8 +6,13 @@
   "TEST_FAILURES_EXTRACT": "grep -E '^(FAIL|FAILED|not ok)' | sed -E 's/^(FAIL|FAILED|not ok)[: ]*//'",
   "FN_MAX_LINES": 60,
   "FORBIDDEN_RULES": [
-    "catch-all|catch[[:space:]]*\\([[:space:]]*(_|e|err|error)?[[:space:]]*\\)[[:space:]]*\\{[[:space:]]*\\}"
+    "~catch-all|catch[[:space:]]*\\([[:space:]]*(_|e|err|error)?[[:space:]]*\\)[[:space:]]*\\{[[:space:]]*\\}"
   ],
   "COMMENT_POLICY": "Comment intent and non-obvious decisions; never narrate what the next line does.",
-  "LIVE_CHECK": "run the changed surface for real (API calls, app run or CLI run) and paste the output"
+  "LIVE_CHECK": "run the changed surface for real (API calls, app run or CLI run) and paste the output",
+  "PARALLEL_PAIRS": "auto",
+  "WORKTREE_DIR": "",
+  "WORKTREE_SETUP_CMD": "none",
+  "GATE_TIMEOUT_SECONDS": 1800,
+  "REVIEWER_AGENT_SCOPE": "project"
 }

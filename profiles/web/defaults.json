@@ -7,9 +7,9 @@
   "LIVE_CHECK": "the changed pages exercised in a browser or a Playwright smoke suite, with screenshots/output saved in the run folder",
   "FORBIDDEN_RULES": [
     "inline-template|template:[[:space:]]*`|styles:[[:space:]]*\\[",
-    "any-type|:[[:space:]]*any([^A-Za-z]|$)|as any",
-    "detect-changes|detectChanges\\(\\)",
-    "nested-subscribe|subscribe\\([^)]*subscribe\\(",
+    "~any-type|:[[:space:]]*any([^A-Za-z]|$)|as any",
+    "~detect-changes|detectChanges\\(\\)",
+    "~nested-subscribe|subscribe\\([^)]*subscribe\\(",
     "physical-css|margin-left|margin-right|padding-left|padding-right"
   ]
 }

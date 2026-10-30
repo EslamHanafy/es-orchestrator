@@ -7,7 +7,7 @@ before EVERY dispatch. -->
 This batch {{BATCH_ID}} = {{ONE_LINE_SCOPE}} (plan {{PLAN_FILE}} phase {{PHASE}} task(s) {{TASKS}}).
 OWNER RULES (binding): {{STANDING_OWNER_RULES — e.g. best practice without shortcuts and without over-engineering; never remove
 shipped functionality the brief does not remove}}.
-READ FIRST, IN FULL: {{RULES_FILES}}; {{PLAN_DIR}}/review-lessons-self-check.md; the plan phase {{PHASE}} task(s) {{TASKS}};
+READ FIRST, IN FULL: {{RULES_FILES}}; {{PLAN_ABS}}/review-lessons-self-check.md; the plan phase {{PHASE}} task(s) {{TASKS}};
 {{CONTRACT_SECTIONS_OR_NONE}}; {{SURVEY_PATH_AND_RULINGS}}.
 </context>
 
@@ -17,12 +17,21 @@ error codes + status, settings keys + example-config lines, indexes/migration na
 write with their exact names, and what NOT to touch.
 </orchestrator_rulings>
 
-<pair — ONLY for batch B of a pair; delete otherwise>
+<worktree — ONLY when this batch runs in its own git worktree (a PARALLEL pair); delete otherwise>
+Your working tree is {{TREE}} (a git worktree on branch {{BRANCH}}, cut from {{BASE}}). Work ONLY there: never cd to or edit the main
+checkout ({{REPO_ROOT}}); the only things you write outside {{TREE}} are the files in {{PLAN_ABS}}/runs/{{RUN}}/. Batch {{PARTNER_ID}}
+runs AT THE SAME TIME in another worktree on files that are disjoint from yours: do not touch its files, and do not assume its code
+exists. Make no commits and no branches (the orchestrator snapshots your tree). Dependencies are installed ({{WORKTREE_SETUP_CMD}});
+if something is missing, list it under DECISIONS NEEDED instead of installing globally. You run the full gate on YOUR tree only; the
+orchestrator gates the combined tree after both batches land.
+{{PORTS_AND_SERVICES — ports, database, container names this batch may use, or none}}
+</worktree>
+<pair — ONLY for batch B of a SEQUENTIAL pair; delete otherwise>
 Batch {{A_ID}} is implemented, unreviewed and uncommitted in the tree. Do not edit its files. If your change breaks one of
 {{A_ID}}'s tests, update that test to the new contract and report it; never add a guard elsewhere to keep the old assertion
 green. BASE for your gates = {{BASE}} (the commit before {{A_ID}}). You run the FULL gate on the combined tree.
 </pair>
-<pair-a — ONLY for batch A of a pair; delete otherwise>
+<pair-a — ONLY for batch A of a SEQUENTIAL pair; delete otherwise>
 Batch B will run on top of your uncommitted work. Run only the focused gates listed below, never the long full gate.
 </pair-a>
 
@@ -38,12 +47,13 @@ Batch B will run on top of your uncommitted work. Run only the focused gates lis
 </hard_rules>
 
 <gates — foreground; output to files in the run folder; paste summaries VERBATIM (the reviewer verifies them against the logs)>
-1. `{{PLAN_DIR}}/check.sh {{BASE}} {{GATE_OPTIONS}} > {{PLAN_DIR}}/runs/{{RUN}}/gate.log 2>&1` → ALL GATES PASS. This is your
+1. `cd "{{TREE}}" && CHECK_ROOT="{{TREE}}" "{{PLAN_ABS}}/check.sh" {{BASE}} {{GATE_OPTIONS}} > "{{PLAN_ABS}}/runs/{{RUN}}/gate.log" 2>&1` → ALL GATES PASS.
+   ({{TREE}} = the repo root for a normal batch, your worktree for a parallel one.) This is your
    LAST step after every edit (no source file may be newer than gate.log). Paste its summary block verbatim.
 2. {{EXTRA_PROOFS — zero-caller proofs for deletions, live calls for every new/changed endpoint or screen (request + response
-   pasted verbatim), query plans for new hot queries}}. Save them to runs/{{RUN}}/live-checks.log as you run them, and paste
+   pasted verbatim), query plans for new hot queries}}. Save them to {{PLAN_ABS}}/runs/{{RUN}}/live-checks.log as you run them, and paste
    from that file.
-3. `git status --porcelain`.
+3. `git -C {{TREE}} status --porcelain`.
 </gates>
 
 <report>

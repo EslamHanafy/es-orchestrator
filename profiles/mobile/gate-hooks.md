@@ -8,13 +8,13 @@
 | iOS (Swift) | `xcodebuild build -scheme <s> -destination 'generic/platform=iOS Simulator'` | `swiftlint` | `swiftformat --lint` | `xcodebuild test …` | `grep -E "error: -\[" ` |
 
 Extra gates worth adding:
-- **Generated code up to date**: regenerate locale keys/codegen into a temp dir and diff against the tree (e.g.
-  `locale_keys.g.dart`, `*.g.dart`, `*.freezed.dart`).
+- **Generated code up to date** (`generated-up-to-date` snippet, opt-in: set `GEN_CMD` and `GEN_FILES` in the copied
+  `gates.d/generated-up-to-date.sh`; it regenerates in place and reports a stale file once).
 - **Preview isolation**: no import of the design-preview folder outside the router's preview entry; no preview keys in
   production code.
 - **`core` never imports `features`**: grep the new imports of changed core files.
-- **Locale parity**: `LOCALE_FILES` covers `.json` and `.arb`. For other formats (`.strings`, `strings.xml`) write a small
-  parser hook.
+- **Locale parity**: `LOCALE_FILES` covers `.json`, `.arb`, `.properties` and `.strings`, including placeholder parity. For other
+  formats (`strings.xml`, YAML, `.po`) the gate reports "unsupported"; write a small parser hook.
 - **Format churn**: run the formatter on BASE copies of changed files to spot format-only diffs (restore those from BASE).
 
 Device checks cannot run in CI-like gates. The reviewer reports them as NOT RUN unless the owner or a simulator run

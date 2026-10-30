@@ -16,7 +16,8 @@ Default reserved categories (setup can add more):
 3. Data-loss, privacy or security trade-offs; retention; deleting user data.
 4. Real scope, cost, quota or schedule changes; new paid services; buying anything.
 5. Anything an existing O-row reserves.
-6. Touching real config, secrets, production or shared infrastructure.
+6. Touching real config, secrets, production or shared infrastructure. This includes `WORKTREE_COPY_FILES` (local files such as
+   `.env` copied into parallel-pair worktrees): record the exact list as an O-row at setup.
 
 Everything else you rule on yourself: test harness, refactors, naming, file splits, evidence format, batch order
 and lane choice. Asking the owner about those wastes their time and stalls the pipeline.

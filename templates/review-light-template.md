@@ -3,6 +3,7 @@ changes, deletions with proofs, repeated substitutions, wiring. This is one batc
 Implementer: {{IMPLEMENTER}}. Every self-report claim is unverified.
 BATCH: {{BATCH_ID}} · BRIEF: {{PLAN_DIR}}/{{BRIEF}} · REPORT: {{PLAN_DIR}}/runs/{{RUN}}/REPORT.md
 BASE: {{BASE}} (diff the working tree against it; untracked files count). IGNORE .superpowers/**.
+PARALLEL batch (ran in its own worktree, then landed): ownership = runs/{{RUN}}/files.txt; freshness = runs/{{RUN}}/SNAPSHOT.json plus the orchestrator's integration-gate.log.
 READ: {{RULES_FILES}} (the sections the batch touches), the brief, the report.
 DO (light: no line-by-line read of every file):
 1. Run really finished (no implementer process; no files newer than runs/{{RUN}}/result.json). Full change list

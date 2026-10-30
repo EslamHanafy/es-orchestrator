@@ -50,6 +50,9 @@ Each implementer REPORT ends with DECISIONS NEEDED. For each one:
 
 ## 5. Dispatch the pair
 
+- **Parallel or sequential?** If the survey tags the pair `PARALLEL-OK`, `PARALLEL_PAIRS` is not `off` and the previous pair is
+  committed, run A and B at the same time in git worktrees (`parallel-pairs.md`) and continue at §6 once they are landed and the
+  integration gate has run. Otherwise use the sequential steps below.
 - A: `mkdir -p $W/runs/<A>; touch $W/runs/<A>/START`, then the lane command with `run_in_background`. Do not poll;
   wait for the completion notification.
 - A's brief must not start a long full gate, because B will edit during it. A runs focused gates; B runs the full
@@ -73,7 +76,7 @@ Each implementer REPORT ends with DECISIONS NEEDED. For each one:
 
 ## 7. Owner report
 
-`SendUserFile` the full report file, plus a plain-language summary in chat: what changed, what the reviewer
+`SendUserFile` the full report file (then `touch $W/<A>+<B>-OWNER_REPORT_SENT`), plus a plain-language summary in chat: what changed, what the reviewer
 fixed, what was handed back, rulings you made, and anything NOT RUN. Use plain checkpoint names, never bare ids.
 
 ## 8. Gate freshness, then commit
@@ -92,7 +95,7 @@ with `git status`.
 
 ## 10. Rhythm
 
-- Do not stop between batches. Write the next pair's briefs while a review runs.
+- In `full` mode do not stop between batches (a single-step mode stops after its own stage). Write the next pair's briefs while a review runs.
 - One chat line per milestone (dispatched, review verdict, committed).
 - Walk the RULE CHECKLIST before every brief, dispatch, ruling and commit. It exists because each of its lines
   was broken once.

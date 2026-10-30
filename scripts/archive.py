@@ -4,7 +4,8 @@
 Usage: archive.py --repo <repo root> --plan-id <PLAN_ID> --session <N> [--keep-sessions 2] [--apply]
 Without --apply it only prints what would move (dry run). With --apply it backs up both files
 (*.bak-<date>s<N>) and then:
-- handoff: every LIVE STATUS block line that starts with "**▶" except the newest END STATE and the newest LIVE line
+- handoff: every LIVE STATUS block line that starts with "**▶" except the FIRST END STATE block and the FIRST live line
+  in file order (blocks are written newest first, so the first ones are the newest)
   (with any lines that follow each moved block up to the next block) → archive-ORCHESTRATOR_HANDOFF-through-s<N>.md;
 - progress: ledger lines tagged "(s<k>)" with k <= N - keep_sessions → archive-progress-through-s<N>.md.
 Protected sections (HARD RULE, ROLES, DECISIONS, RULE CHECKLIST, Workflow, Checklists, Key paths) are never touched.
@@ -13,6 +14,7 @@ import argparse
 import datetime
 import re
 import shutil
+import sys
 from pathlib import Path
 
 LIVE_HEADING = re.compile(r"^## ▶ LIVE STATUS")
@@ -23,7 +25,10 @@ SESSION_TAG = re.compile(r"\(s(\d+)\)")
 
 def split_live(lines: list):
     """Return (start, end) line indexes of the LIVE STATUS section body."""
-    start = next(i for i, l in enumerate(lines) if LIVE_HEADING.match(l)) + 1
+    heading = next((i for i, l in enumerate(lines) if LIVE_HEADING.match(l)), None)
+    if heading is None:
+        sys.exit("no '## ▶ LIVE STATUS' heading in the handoff; add it (see templates/ORCHESTRATOR_HANDOFF.md) and retry.")
+    start = heading + 1
     end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
     return start, end
 
@@ -91,6 +96,9 @@ def main():
     a = ap.parse_args()
     d = a.repo / ".superpowers" / "sdd" / a.plan_id
     handoff, progress = d / "ORCHESTRATOR_HANDOFF.md", d / "progress.md"
+    for needed in (handoff, progress):
+        if not needed.is_file():
+            sys.exit(f"not found: {needed}. Check --repo / --plan-id.")
     new_h, moved_h = trim_handoff(handoff.read_text(encoding="utf-8"))
     new_p, moved_p = trim_progress(progress.read_text(encoding="utf-8"), a.session - a.keep_sessions)
     print(f"handoff: {len(moved_h)} lines to archive · progress: {len(moved_p)} ledger lines to archive")

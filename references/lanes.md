@@ -22,6 +22,9 @@ Load the delegate skill once per session before the first dispatch. Each skill d
   the batch they fix.
 - **Background, never poll.** Run the relay with `run_in_background` and wait for the completion notification. A
   wait loop that exits when a known pid ends is fine. Periodic `ps`/`tail` checks are not.
+- **Parallel pairs.** Both lanes run at the same time with `--cd <worktree>`; each worktree is its own tree, so there is no
+  file ownership by mtime. Check quota for two simultaneous sessions first. A fix round runs in the main tree (new session if
+  the CLI cannot change its directory on resume).
 - **Run marker.** `touch runs/<id>/START` right before dispatch. The pair reviewer assigns file ownership by mtime
   against it.
 - **Out-dir per run.** `runs/<id>/` holds `result.json`, `REPORT.md` (the final message saved verbatim),

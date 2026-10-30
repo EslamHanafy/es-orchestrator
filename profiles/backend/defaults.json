@@ -5,12 +5,12 @@
   "FN_MAX_LINES": 60,
   "LIVE_CHECK": "containers up and healthy; e2e suites of changed endpoints pass; each new/changed endpoint called with curl, request + response compared with the contract",
   "FORBIDDEN_RULES": [
-    "sync-over-async|\\.Result[^A-Za-z]|\\.Wait\\(\\)|\\.GetAwaiter\\(\\)\\.GetResult\\(\\)",
-    "async-void|async void",
-    "throw-generic|throw new Exception\\(",
+    "~sync-over-async|\\.Result[^A-Za-z]|\\.Wait\\(\\)|\\.GetAwaiter\\(\\)\\.GetResult\\(\\)",
+    "~async-void|async void",
+    "~throw-generic|throw new Exception\\(",
     "offset-paging|\\.Skip\\(|OFFSET [0-9]",
     "raw-sql-interp|FromSqlRaw\\(\\$|ExecuteSqlRaw\\(\\$|query\\(`[^`]*\\$\\{",
-    "fire-and-forget|Task\\.Run\\("
+    "~fire-and-forget|Task\\.Run\\("
   ],
   "COMMENT_POLICY": "Comprehensive comments: a doc comment on every type and member, private ones included, plus inline comments that explain complex or long logic."
 }

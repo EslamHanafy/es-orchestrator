@@ -27,29 +27,65 @@ TEST_CMD='{{TEST_CMD}}'                    # HOOK
 TEST_FAILURES_EXTRACT='{{TEST_FAILURES_EXTRACT}}'  # HOOK: filter stdin → one failing test id per line
 E2E_CMD='{{E2E_CMD}}'                      # HOOK: receives the suites as $E2E; prints each suite's own check count
 FN_MAX={{FN_MAX_LINES}}
+GATE_TIMEOUT={{GATE_TIMEOUT_SECONDS}}      # seconds per build / lint / test / e2e command; 0 = no limit
 LOCALE_FILES='{{LOCALE_FILES}}'            # comma-separated JSON/ARB locale files, or none
 # -------------------------------------------------------------------------------------------------------------------
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # CHECK_ROOT lets a worktree track run this (main-tree, gitignored) gate against ITS own tree.
 ROOT="${CHECK_ROOT:-$(git -C "$HERE" rev-parse --show-toplevel)}"
+# Running this gate from inside another checkout (a parallel-pair worktree) without CHECK_ROOT would silently gate the wrong tree.
+INVOKED_IN="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$INVOKED_IN" && "$(cd "$INVOKED_IN" && pwd -P)" != "$(cd "$ROOT" && pwd -P)" ]]; then
+  echo "check.sh was started inside $INVOKED_IN but would gate $ROOT. Run it as: CHECK_ROOT=$INVOKED_IN $0 $*"; exit 2
+fi
 cd "$ROOT" || exit 2
-OUT="$(mktemp -d)"; FAILED=0
+# Stable git output whatever the user's config says: real UTF-8 names, a/ b/ prefixes, no external diff.
+G=(git -c core.quotepath=off -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.autocrlf=false)
+# Temp dir: the system one, or a folder in the plan dir when the sandbox forbids it. Removed on exit (ES_KEEP_TMP=1 keeps it).
+OUT="$(mktemp -d 2>/dev/null)" || OUT="$(mktemp -d "$HERE/.gate-tmp.XXXXXX")" || { echo "cannot create a temp dir"; exit 2; }
+cleanup() {
+  [[ -n "${LOCK_DIR:-}" && "$(cat "$LOCK_DIR/pid" 2>/dev/null)" == "$$" ]] && rm -rf "$LOCK_DIR"
+  [[ -z "${ES_KEEP_TMP:-}" ]] && rm -rf "$OUT"
+}
+trap cleanup EXIT
+FAILED=0
 fail() { echo "❌ $1"; FAILED=1; }
 pass() { echo "✅ $1"; }
 skip() { echo "⏭  $1"; }
 set_or_none() { [[ -n "$1" && "$1" != "none" ]]; }
-git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null || { echo "unknown base $BASE"; exit 2; }
+# timed <command…>: run with the wall-clock limit (exit 124 on timeout). Kills the whole process group.
+timed() { python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@"; }
+# build_diff <list file> <out file>: added lines (git diff -U0 vs BASE, untracked text files whole) of the listed files.
+build_diff() {
+  : > "$2"
+  [[ -s "$1" ]] || return 0
+  tr '\n' '\0' < "$1" | xargs -0 "${G[@]}" diff --no-ext-diff --src-prefix=a/ --dst-prefix=b/ -U0 "$BASE" -- > "$2" 2>/dev/null || true
+  while IFS= read -r f; do
+    "${G[@]}" ls-files --error-unmatch "$f" >/dev/null 2>&1 && continue
+    grep -Iq . "$f" 2>/dev/null || continue   # binary or empty: nothing to scan
+    { echo "+++ b/$f"; sed 's/^/+/' "$f"; echo; } >> "$2"   # the extra echo ends a last line that has no newline
+  done < "$1"
+}
+# run_snippet <file>: source a gates.d snippet, but fail the gate when it does not even parse (it would silently not run).
+run_snippet() {
+  if ! "$BASH" -n "$1" 2> "$OUT/snippet.err"; then
+    fail "gate snippet $(basename "$1") has a syntax error and did not run: $(head -2 "$OUT/snippet.err" | tr '\n' ' ')"; return
+  fi
+  source "$1"
+}
+"${G[@]}" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null || { echo "unknown base $BASE"; exit 2; }
 
 # Changed + untracked files (deleted excluded).
-{ git diff --name-only --diff-filter=d "$BASE"; git ls-files --others --exclude-standard; } | sort -u \
-  | while read -r f; do [[ -f "$f" ]] && echo "$f"; done > "$OUT/all"
+{ "${G[@]}" diff --name-only --diff-filter=d "$BASE"; "${G[@]}" ls-files --others --exclude-standard; } | sort -u \
+  | while IFS= read -r f; do [[ -f "$f" ]] && echo "$f"; done > "$OUT/all"
 grep -E "$SRC_PATTERN" "$OUT/all" > "$OUT/src" || true
 echo "Changed files: $(wc -l < "$OUT/all" | tr -d ' ') (source: $(wc -l < "$OUT/src" | tr -d ' '))"
 
 # Extra gates (gates.d/*.sh, sourced): pre-*.sh run here (e.g. a shared container lock), the rest before e2e.
-# A snippet may use $BASE $ROOT $HERE $OUT ($OUT/all, $OUT/src) $E2E and pass/fail/skip/set_or_none.
-for g in "$HERE"/gates.d/pre-*.sh; do [[ -f "$g" ]] && source "$g"; done
+# A snippet may use $BASE $ROOT $HERE $OUT ($OUT/all, $OUT/src) $E2E $GATE_TIMEOUT and pass/fail/skip/set_or_none/timed.
+# Do not set your own EXIT trap: check.sh's cleanup() removes $OUT and the stack lock ($LOCK_DIR).
+for g in "$HERE"/gates.d/pre-*.sh; do [[ -f "$g" ]] && run_snippet "$g"; done
 
 # 1. secrets never tracked. HOOK: adjust to this repo's real-config names.
 if git ls-files | grep -E '(^|/)(\.env(\.[A-Za-z0-9_-]+)?|secrets/.+)$' | grep -vE '\.example$' > "$OUT/secrets"; then
@@ -64,8 +100,9 @@ fi
 # 3–4. build and lint.
 run_gate() { # name, command
   if ! set_or_none "$2"; then skip "$1 (not configured)"; return; fi
-  bash -c "$2" > "$OUT/$1.txt" 2>&1; local code=$?
+  timed bash -c "$2" > "$OUT/$1.txt" 2>&1; local code=$?
   if [[ $code == 0 ]]; then pass "$1"
+  elif [[ $code == 124 ]]; then fail "$1: TIMED OUT after ${GATE_TIMEOUT}s (hung command or too slow; raise GATE_TIMEOUT if legitimate):"; tail -5 "$OUT/$1.txt"
   elif [[ $code == 127 ]]; then fail "$1: TOOL NOT FOUND (environment problem, not a code finding):"; tail -3 "$OUT/$1.txt"
   else fail "$1:"; tail -40 "$OUT/$1.txt"; fi
 }
@@ -74,17 +111,18 @@ run_gate lint "$LINT_CMD"
 
 # 5. format: changed source files only, never a directory.
 if [[ -s "$OUT/src" ]] && set_or_none "$FORMAT_CHECK"; then
-  if tr '\n' '\0' < "$OUT/src" | xargs -0 bash -c "$FORMAT_CHECK \"\$@\"" _ > "$OUT/format.txt" 2>&1; then pass "format (changed files)"
+  if tr '\n' '\0' < "$OUT/src" | xargs -0 python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- bash -c "$FORMAT_CHECK \"\$@\"" _ > "$OUT/format.txt" 2>&1; then pass "format (changed files)"
   else fail "format:"; tail -20 "$OUT/format.txt"; fi
 fi
 
 # 6. tests vs known failures.
 if [[ $RUN_TESTS == 1 ]] && set_or_none "$TEST_CMD"; then
-  bash -c "$TEST_CMD" > "$OUT/tests.txt" 2>&1; TEST_EXIT=$?
+  timed bash -c "$TEST_CMD" > "$OUT/tests.txt" 2>&1; TEST_EXIT=$?
   bash -c "$TEST_FAILURES_EXTRACT" < "$OUT/tests.txt" | sort -u > "$OUT/failed" || true
   grep -vE '^\s*(#|$)' "$HERE/known-test-failures.txt" 2>/dev/null | sort -u > "$OUT/known" || true
   NEW="$(comm -23 "$OUT/failed" "$OUT/known")"
-  if [[ -n "$NEW" ]]; then fail "new test failures:"; echo "$NEW"
+  if [[ $TEST_EXIT == 124 ]]; then fail "tests TIMED OUT after ${GATE_TIMEOUT}s:"; tail -10 "$OUT/tests.txt"
+  elif [[ -n "$NEW" ]]; then fail "new test failures:"; echo "$NEW"
   elif [[ $TEST_EXIT != 0 && ! -s "$OUT/failed" ]]; then fail "tests exited $TEST_EXIT with no parsed failures:"; tail -30 "$OUT/tests.txt"
   else pass "tests (failures all known: $(wc -l < "$OUT/failed" | tr -d ' '))"; fi
 fi
@@ -98,22 +136,20 @@ if [[ -s "$OUT/src" ]]; then
   if [[ -s "$OUT/fnlen.bad" ]]; then fail "functions over $FN_MAX lines:"; cat "$OUT/fnlen.bad"; else pass "function length ≤ $FN_MAX"; fi
 fi
 
-# 8. forbidden patterns in ADDED source lines; ruled exceptions in forbidden-allow.txt as "path|rule|ruling".
+# 8. forbidden patterns in ADDED source lines (scan_added.py); ruled exceptions in forbidden-allow.txt as "path|rule|ruling".
+#    A rule named ~name matches code only (strings and comments removed first).
 if [[ -s "$OUT/src" ]]; then
-  tr '\n' '\0' < "$OUT/src" | xargs -0 git diff -U0 "$BASE" -- > "$OUT/added.diff" 2>/dev/null || true
-  # Untracked files count as fully added.
-  while read -r f; do
-    git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { echo "+++ b/$f"; sed 's/^/+/' "$f"; }
-  done < "$OUT/src" >> "$OUT/added.diff"
-  BAD=0
-  while IFS='|' read -r rule regex; do
-    [[ -z "$rule" || "$rule" == \#* ]] && continue
-    # The regex goes through ENVIRON, because awk -v would eat its backslashes.
-    hits="$(RE="$regex" awk 'BEGIN{re=ENVIRON["RE"]} /^\+\+\+ b\//{f=substr($0,7);next} /^\+/ && substr($0,2) ~ re {print f": "substr($0,2)}' "$OUT/added.diff")"
-    hits="$(echo "$hits" | while read -r h; do [[ -n "$h" ]] && ! grep -qF "${h%%:*}|$rule" "$HERE/forbidden-allow.txt" && echo "$h"; done)"
-    if [[ -n "$hits" ]]; then fail "forbidden pattern [$rule]:"; echo "$hits" | head -10; BAD=1; fi
-  done < "$HERE/forbidden-patterns.txt"
-  [[ $BAD == 0 ]] && pass "forbidden patterns"
+  build_diff "$OUT/src" "$OUT/added.diff"
+  if python3 "$HERE/scan_added.py" --diff "$OUT/added.diff" --rules "$HERE/forbidden-patterns.txt" --allow "$HERE/forbidden-allow.txt" > "$OUT/forbidden.txt" 2>&1
+  then pass "forbidden patterns"; else fail "forbidden patterns:"; head -40 "$OUT/forbidden.txt"; fi
+fi
+
+# 8b. secrets in ADDED lines of ALL changed files (lockfiles and *.example excluded), same allow file.
+grep -vE '(\.example$|\.lock$|package-lock\.json$|pnpm-lock\.yaml$|yarn\.lock$)' "$OUT/all" > "$OUT/all.scan" || true
+if [[ -s "$OUT/all.scan" ]]; then
+  build_diff "$OUT/all.scan" "$OUT/added-all.diff"
+  if python3 "$HERE/scan_added.py" --diff "$OUT/added-all.diff" --rules "$HERE/secret-patterns.txt" --allow "$HERE/forbidden-allow.txt" > "$OUT/secrets-added.txt" 2>&1
+  then pass "no secrets in added lines"; else fail "possible secrets in added lines:"; head -20 "$OUT/secrets-added.txt"; fi
 fi
 
 # 9. locale key parity (all locale files have the same keys and no empty values).
@@ -122,11 +158,13 @@ if set_or_none "$LOCALE_FILES"; then
   else fail "locale parity:"; head -30 "$OUT/locale.txt"; fi
 fi
 
-for g in "$HERE"/gates.d/*.sh; do [[ -f "$g" && "$(basename "$g")" != pre-* ]] && source "$g"; done
+for g in "$HERE"/gates.d/*.sh; do [[ -f "$g" && "$(basename "$g")" != pre-* ]] && run_snippet "$g"; done
 
 # 10. optional e2e / live checks.
 if [[ -n "$E2E" ]] && set_or_none "$E2E_CMD"; then
-  if E2E="$E2E" bash -c "$E2E_CMD" > "$OUT/e2e.txt" 2>&1; then pass "e2e: $E2E"; tail -15 "$OUT/e2e.txt"
+  E2E="$E2E" timed bash -c "$E2E_CMD" > "$OUT/e2e.txt" 2>&1; E2E_EXIT=$?
+  if [[ $E2E_EXIT == 0 ]]; then pass "e2e: $E2E"; tail -15 "$OUT/e2e.txt"
+  elif [[ $E2E_EXIT == 124 ]]; then fail "e2e TIMED OUT after ${GATE_TIMEOUT}s:"; tail -10 "$OUT/e2e.txt"
   else fail "e2e:"; tail -40 "$OUT/e2e.txt"; fi
 fi
 

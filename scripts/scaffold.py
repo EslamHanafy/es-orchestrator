@@ -3,6 +3,7 @@
 
 Usage:
   scaffold.py --answers answers.json --repo <repo root> [--force] [--only <file>]
+  scaffold.py --upgrade-static --repo <repo root> --plan-id <PLAN_ID> [--force]
 
 Reads answers.json (schema: references/answers-schema.md), merges the stack profile defaults (generic first, then each
 profile in PROFILES order, answers last), renders templates/ and the profile checklists, and prints every setup
@@ -11,6 +12,7 @@ backed up as <file>.bak-<date>.
 """
 import argparse
 import datetime
+import difflib
 import json
 import re
 import shutil
@@ -22,15 +24,17 @@ SKILL = Path(__file__).resolve().parent.parent
 TEMPLATES = SKILL / "templates"
 PROFILES = SKILL / "profiles"
 PLACEHOLDER = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
+PLAN_ID_RE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 # Templates copied as-is into the plan folder (decisions-table.md is embedded in the handoff instead).
 COPY_FILES = ["ORCHESTRATOR_HANDOFF.md", "progress.md", "brief-template.md", "survey-brief-template.md",
               "review-full-template.md", "review-light-template.md", "review-lessons-self-check.md",
-              "NEXT_SESSION_PROMPT.md", "reviewer-agent.md", "check.sh", "fnlen.py", "locale_parity.py",
+              "NEXT_SESSION_PROMPT.md", "reviewer-agent.md", "check.sh", "fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt",
               "fnlen-allow.txt", "forbidden-allow.txt", "forbidden-patterns.txt", "known-test-failures.txt"]
-EXECUTABLE = {"check.sh", "fnlen.py", "locale_parity.py"}
+STATIC_FILES = ["fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt"]
+EXECUTABLE = {"check.sh", "fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py"}
 # Files whose <angle> fields and descriptive {{NAME — hint}} placeholders are filled by hand during setup.
 HAND_FILL_FILES = {"ORCHESTRATOR_HANDOFF.md", "progress.md", "NEXT_SESSION_PROMPT.md"}
-HAND_FIELD = re.compile(r"(?<!\()<(?:sha|total|phase 1|scope|state|n(?: [^>]*)?)>|\{\{[A-Z_]+ — [^}]*\}\}")
+HAND_FIELD = re.compile(r"(?<!\()<(?:sha|total|phase 1|scope|state|stage|next mode|n(?: [^>]*)?)>|\{\{[A-Z_]+ — [^}]*\}\}")
 RULES_MODES = {"default": "profile defaults, unchanged", "edit": "profile defaults, edited with the owner",
                "replace": "the owner's own rules replace the defaults", "repo": "the repo's rules file only"}
 SCHEMA_KEYS = {"PROJECT_NAME", "PLAN_ID", "PLAN_TITLE", "PLAN_FILE", "RULES_FILES", "CONTRACT_DOCS", "BASE_BRANCH",
@@ -38,7 +42,15 @@ SCHEMA_KEYS = {"PROJECT_NAME", "PLAN_ID", "PLAN_TITLE", "PLAN_FILE", "RULES_FILE
                "LIVE_CHECK", "FN_MAX_LINES", "LANGUAGES", "LOCALE_FILES", "REVIEWER_MODEL", "REVIEWER_EFFORT",
                "REVIEWER_AGENT", "HELPER_MODEL", "BATCH_MINUTES", "STAGE_PATHS", "NEVER_STAGE", "FORBIDDEN_GIT",
                "OWNER_NAME", "STACK_SUMMARY", "SRC_PATTERN", "MIGRATIONS_GLOB", "FORMAT_CHECK",
-               "TEST_FAILURES_EXTRACT"}
+               "TEST_FAILURES_EXTRACT", "PARALLEL_PAIRS", "WORKTREE_DIR", "WORKTREE_SETUP_CMD", "GATE_TIMEOUT_SECONDS",
+               "REVIEWER_AGENT_SCOPE"}
+# Structured answers (lists/objects) that are not {{KEY}} placeholders themselves.
+STRUCTURED_KEYS = {"PROFILES", "LANES", "OWNER_RESERVED", "CODING_RULES", "EXTRA_GATES", "WORKTREE_COPY_FILES",
+                   "FORBIDDEN_RULES"}
+# Values written to <plan>/config.json for scripts that run without answers.json (worktree.py, doctor.py).
+CONFIG_KEYS = ("PLAN_ID", "BASE_BRANCH", "WORK_BRANCH", "SOURCE_DIRS", "STAGE_PATHS", "PARALLEL_PAIRS", "WORKTREE_DIR",
+               "WORKTREE_SETUP_CMD", "WORKTREE_COPY_FILES", "GATE_TIMEOUT_SECONDS", "REVIEWER_AGENT",
+               "REVIEWER_AGENT_SCOPE")
 
 
 def read(path: Path) -> str:
@@ -53,6 +65,14 @@ def profile_list(answers: dict) -> list:
         if not (PROFILES / name).is_dir():
             sys.exit(f"unknown profile '{name}' (have: {', '.join(p.name for p in PROFILES.iterdir())})")
     return list(dict.fromkeys(names))
+
+
+def default_keys(profiles: list) -> set:
+    """Every key the chosen profiles define defaults for (valid answer keys besides the schema)."""
+    keys = set()
+    for name in profiles:
+        keys |= set(json.loads(read(PROFILES / name / "defaults.json") or "{}"))
+    return keys
 
 
 def merged_values(answers: dict, profiles: list) -> dict:
@@ -88,10 +108,15 @@ def render_lanes(lanes: list) -> dict:
 
 def derived_values(answers: dict, profiles: list, repo: Path) -> dict:
     """Compute the values the templates need but the owner does not type."""
-    plan_id = answers.get("PLAN_ID", "PLAN")
+    plan_id = answers["PLAN_ID"]
     reserved = answers.get("OWNER_RESERVED", [])
+    agent = answers.get("REVIEWER_AGENT", "reviewer")
+    user_scope = answers.get("REVIEWER_AGENT_SCOPE", "project") == "user"
     derived = {
         "PLAN_DIR": f".superpowers/sdd/{plan_id}",
+        "PLAN_ABS": str(repo / ".superpowers" / "sdd" / plan_id),
+        "REVIEWER_AGENT_PATH": f"~/.claude/agents/{agent}.md" if user_scope else f".claude/agents/{agent}.md",
+        "WORKTREE_DIR_RESOLVED": answers.get("WORKTREE_DIR") or str(repo.parent / f"{repo.name}.worktrees"),
         "TODAY": datetime.date.today().isoformat(),
         "REPO_ROOT": str(repo),
         "PROFILE_NAMES": ", ".join(profiles),
@@ -197,25 +222,66 @@ def report_environment(repo: Path, plan_dir: Path, values: dict):
     ignored = subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", str(plan_dir)],
                              capture_output=True).returncode == 0
     print(f"gitignore: {'OK, .superpowers is ignored' if ignored else 'NOT IGNORED — propose adding .superpowers/ to .gitignore'}")
-    agent = Path.home() / ".claude" / "agents" / f"{values.get('REVIEWER_AGENT', 'reviewer')}.md"
+    name = f"{values.get('REVIEWER_AGENT', 'reviewer')}.md"
+    user_scope = values.get("REVIEWER_AGENT_SCOPE", "project") == "user"
+    agent = (Path.home() / ".claude" / "agents" if user_scope else repo / ".claude" / "agents") / name
     state = "already installed" if agent.exists() else "not installed — copy reviewer-agent.md there after the owner's OK"
     print(f"reviewer agent: {agent} ({state})")
+    if not user_scope and not agent.exists():
+        print("  project-level agents are not gitignored: after copying, offer `echo .claude/agents/" + name
+              + " >> .git/info/exclude` (local, not committed) unless the team wants the agent shared.")
+
+
+def upgrade_static(repo: Path, plan_id: str, force: bool):
+    """Add the placeholder-free helper files (new or changed in a skill update) to an existing plan folder."""
+    plan_dir = repo / ".superpowers" / "sdd" / plan_id
+    if not plan_dir.is_dir():
+        sys.exit(f"plan folder not found: {plan_dir}")
+    for name in STATIC_FILES:
+        text, target = read(TEMPLATES / name), plan_dir / name
+        if not target.exists():
+            write_file(target, text, False)
+            print(f"added: {name}")
+        elif target.read_text(encoding="utf-8") == text:
+            print(f"up to date: {name}")
+        elif force:
+            write_file(target, text, True)
+            print(f"updated: {name} (backup kept)")
+        else:
+            print(f"differs (kept yours): {name}; pass --force to replace it")
+    print("check.sh is not touched: it holds this project's gate commands. To get the new timeouts, cleanup and secret scan,\n"
+          "regenerate it with the original answers (`--only check.sh --force`, add GATE_TIMEOUT_SECONDS) or merge the\n"
+          "changes from templates/check.sh by hand.")
 
 
 def main():
     """Parse arguments, render every file, and print the result summary."""
     parser = argparse.ArgumentParser(description="Generate the es-orchestrator plan folder.")
-    parser.add_argument("--answers", required=True, type=Path)
+    parser.add_argument("--answers", type=Path)
     parser.add_argument("--repo", required=True, type=Path)
+    parser.add_argument("--plan-id")
+    parser.add_argument("--upgrade-static", action="store_true", help="add/refresh the helper scripts in an existing plan")
     parser.add_argument("--force", action="store_true", help="overwrite existing files (backups kept)")
     parser.add_argument("--only", help="regenerate just this output file (backup kept)")
     args = parser.parse_args()
 
-    answers = json.loads(args.answers.read_text(encoding="utf-8"))
     repo = args.repo.resolve()
+    if args.upgrade_static:
+        if not args.plan_id:
+            sys.exit("--upgrade-static needs --plan-id")
+        return upgrade_static(repo, args.plan_id, args.force)
+    if not args.answers:
+        sys.exit("--answers is required")
+    answers = json.loads(args.answers.read_text(encoding="utf-8"))
+    plan_id = str(answers.get("PLAN_ID", ""))
+    if not PLAN_ID_RE.fullmatch(plan_id):
+        sys.exit(f"PLAN_ID '{plan_id}' is invalid: use UPPER_SNAKE (letters A-Z, digits, underscore; 2-64 chars; "
+                 "starts with a letter), e.g. ACME_API_REVAMP.")
     profiles = profile_list(answers)
     values = merged_values(answers, profiles)
-    values.update(derived_values(answers, profiles, repo))
+    known = SCHEMA_KEYS | STRUCTURED_KEYS | default_keys(profiles)
+    unknown = sorted(k for k in answers if not k.startswith("_") and k not in known)
+    values.update(derived_values({**values, **answers}, profiles, repo))
     plan_dir = repo / values["PLAN_DIR"]
     files = sources(answers, profiles, repo)
     values["REPO_RULES_FILES"] = values.get("RULES_FILES", "{{RULES_FILES}}")
@@ -226,6 +292,8 @@ def main():
     for sub in ("runs/baseline", "gates.d"):
         (plan_dir / sub).mkdir(parents=True, exist_ok=True)
 
+    if args.only and args.only not in files:
+        sys.exit(f"--only {args.only}: no such output file (have: {', '.join(sorted(files))})")
     setup_keys = SCHEMA_KEYS | {"LANES", "OWNER_RESERVED"} | set(values)
     written, skipped, leftovers, by_hand = [], [], [], []
     for name, raw in files.items():
@@ -236,7 +304,15 @@ def main():
         by_hand += hand_fill(name, text)
         (written if write_file(plan_dir / name, text, args.force or bool(args.only)) else skipped).append(name)
 
+    if not args.only:
+        config = {k: values.get(k, answers.get(k)) for k in CONFIG_KEYS}
+        config["WORKTREE_DIR"] = values["WORKTREE_DIR_RESOLVED"]
+        config["WORKTREE_COPY_FILES"] = answers.get("WORKTREE_COPY_FILES", [])
+        write_file(plan_dir / "config.json", json.dumps(config, indent=2, ensure_ascii=False) + "\n", args.force)
     print(f"plan folder: {plan_dir}\nprofiles: {', '.join(profiles)}\nwritten: {len(written)} files")
+    for key in unknown:
+        near = difflib.get_close_matches(key, sorted(known), n=1)
+        print(f"UNKNOWN KEY (ignored): {key}" + (f" — did you mean {near[0]}?" if near else ""))
     if skipped:
         print("skipped (exist): " + ", ".join(skipped))
     print("UNFILLED:" if leftovers else "UNFILLED: none")

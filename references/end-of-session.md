@@ -11,6 +11,7 @@ Back up first: `cp ORCHESTRATOR_HANDOFF.md ORCHESTRATOR_HANDOFF.md.bak-<date>s<N
 ```
 **▶▶ SESSION <N> END STATE (<date>; <why it stopped>) — RESUME HERE FIRST:**
 - PROGRESS: ≈ <done>/<total> plan tasks ✅ (≈ <x> % by count, ≈ <y> % by effort). PHASES CLOSED: … OPEN: …
+- STAGE: <stage> · NEXT MODE: <mode + target> (also set with `status.py --set-stage`) · LIVE WORKTREES: none / <ids + paths>
 - BRANCHES: <branch> <short sha> = <what>; worktree tracks and their state; merge-gate counter.
 - COMMITS THIS SESSION: <sha> <batch> · …  Rulings <range> (where). Owner decisions O-<a>…O-<b>.
 - AT STOP: what is RUNNING (pid, out-dir, session id) or FINISHED-UNCOMMITTED (report path, open DECISIONS).
@@ -26,6 +27,7 @@ Replace the previous session's LIVE line. Do not stack them. Old END STATE block
 ## 2. NEXT_SESSION_PROMPT.md
 
 Back it up as `NEXT_SESSION_PROMPT.md.bak-<date>s<N>`, then rewrite it from `templates/NEXT_SESSION_PROMPT.md`:
+- the mode to run first (`NEXT MODE`: full, plan, orchestrate, review <ids> or commit);
 - the read order (END STATE, RULE CHECKLIST, ROLES, newest decisions, checklists, progress tail, the specific
   survey/fact files);
 - STATE in two or three lines (HEADs, what is uncommitted, what is running);
@@ -51,6 +53,8 @@ Aim: handoff ≲ 400 lines, progress ≲ 300 lines of live ledger.
 
 ## 4. Last checks
 
+- `python3 $ES/scripts/doctor.py --repo . --plan-id <PLAN_ID>` shows no ❌ and no leftover worktrees (land or `worktree.py remove`
+  them; a live worktree is named in END STATE).
 - `git status`: nothing of yours left unstaged by accident. Everything uncommitted is named in END STATE.
 - No background process of yours left running unless END STATE names it.
 - Memory: if a cross-project lesson emerged (a workflow preference, a tool gotcha), save it to user memory, not

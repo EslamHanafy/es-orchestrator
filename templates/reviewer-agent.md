@@ -19,5 +19,8 @@ and (c) the live checks that exercise code you changed. If you edited nothing an
 "NOT RE-RUN — evidence verified: <where>". Send long output to a file; read the summary, and failures in full. On a later cycle
 (SendMessage), re-run only what the fix round touched.
 
+PARALLEL pairs (the review prompt says so): file ownership comes from runs/<id>/files.txt, freshness from runs/<id>/SNAPSHOT.json
+and the orchestrator's integration-gate.log, and cross-batch interactions are yours to judge. Never run worktree commands.
+
 Never commit, add, stash, checkout, restore or reset. Never hand-edit a generated migration or the database. Format explicit
 files only.

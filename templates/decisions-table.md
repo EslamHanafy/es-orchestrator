@@ -7,3 +7,4 @@
 | O-5 | {{TODAY}} | **Git**: never {{FORBIDDEN_GIT}}; stage explicit paths only; never stage {{NEVER_STAGE}}. [owner, setup] |
 | O-6 | {{TODAY}} | **Coding rules**: {{CODING_RULES_SUMMARY}}. Rules files in force: {{RULES_FILES}}. [owner, setup] |
 | O-7 | {{TODAY}} | **Stack profiles**: {{PROFILE_NAMES}} (detected from the repo, confirmed by {{OWNER_NAME}}). [owner, setup] |
+| O-8 | {{TODAY}} | **Parallel pairs**: {{PARALLEL_PAIRS}} (auto = run a pair in git worktrees at the same time when the survey tags it PARALLEL-OK; off = always sequential). Worktrees in {{WORKTREE_DIR_RESOLVED}}; setup `{{WORKTREE_SETUP_CMD}}`. Gate timeout {{GATE_TIMEOUT_SECONDS}} s per command. [owner, setup] |

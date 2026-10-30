@@ -18,6 +18,13 @@ PAIR (one review covers two batches run back to back; B was implemented on top o
   that asked for it. B was told to update (never guard around) A's tests it broke.
 - A LIGHT (MECHANICAL) batch is reviewed with review-light-template.md steps 1–4 inside this review, its judgement hunks read in
   full. Every finding names its batch (A / B / both). "Brief followed exactly" is judged PER BATCH. One report, one gate cycle.
+PARALLEL PAIR (delete this block unless A and B ran AT THE SAME TIME in separate worktrees and were then landed together):
+- FILE OWNERSHIP = runs/{{A_RUN}}/files.txt and runs/{{B_RUN}}/files.txt, never mtimes (landing rewrote them). The sets are disjoint.
+- EVIDENCE: each implementer gated only its OWN tree. Their freshness proof is runs/<id>/SNAPSHOT.json (`gate_fresh: true` = the gate
+  log was newer than every file the batch changed). The COMBINED tree was gated by the orchestrator: runs/{{B_RUN}}/integration-gate.log.
+  Verify it, and that no source file is newer than it (`find {{SOURCE_DIRS}} -newer <that log> -type f`).
+- Nobody ran A+B together before that gate: judge cross-batch interactions yourself (shared callers, config keys, DI wiring, locale
+  keys, tests that touch both). "Run really finished" = no relay process for either run and both snapshots exist.
 SURVEY / RULINGS: {{SURVEY_PATH}}
 BASE COMMIT: {{BASE}} (pair: the commit BEFORE A). Diff the working tree against it; untracked files count. IGNORE .superpowers/**.
 
@@ -35,7 +42,7 @@ DO:
    exist and assert what their names say.
 3. Gates — EVIDENCE FIRST, NO BLIND RE-RUNS:
    a. Verify the evidence: the summaries pasted in the report(s) match the run logs (verbatim, same counts); no source file is newer
-      than the last gate log (`find {{SOURCE_DIRS}} -newer <gate.log> -type f`); the Self-check answers every line of
+      than the last gate log (parallel pair: the integration gate log) (`find {{SOURCE_DIRS}} -newer <gate.log> -type f`); the Self-check answers every line of
       review-lessons-self-check.md (spot-check its claims).
    b. Re-run ONLY: the gate parts and suites your own edits touch; anything that failed, was skipped or rests on an unproven
       excuse (prove or disprove it, e.g. at BASE); the live checks of code you changed.

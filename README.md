@@ -18,17 +18,24 @@ included). The coding rules ship as defaults that you keep, edit or replace duri
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Run modes: one step or the whole cycle](#run-modes-one-step-or-the-whole-cycle)
+- [Parallel pairs (git worktrees)](#parallel-pairs-git-worktrees)
 - [How a cycle works](#how-a-cycle-works)
 - [Prompt cheat sheet](#prompt-cheat-sheet)
 - [What gets generated](#what-gets-generated)
 - [Implementer lanes](#implementer-lanes)
+- [Health check, upgrades and tests](#health-check-upgrades-and-tests)
 - [Troubleshooting](#troubleshooting)
 - [Customize](#customize)
 - [Layout of this skill](#layout-of-this-skill)
 
 ## Install
 
-Requirements: `git`, `bash` and `python3` (standard library only) on your machine, and Node.js for `npx`.
+Requirements: `git`, `bash` and `python3` 3.8+ (standard library only) on your machine, and Node.js for `npx`. macOS and Linux
+are supported; on Windows use WSL.
+
+> **Built for Claude Code.** The workflow uses Claude Code's `AskUserQuestion`, `SendUserFile`, `Agent` (subagents) and background
+> commands. Other agents that `npx skills` can install it for will run it with fallbacks (plain-chat questions, printed report
+> paths, a delegate lane as reviewer), but Claude Code is the supported host. Use `-a claude-code` to install only there.
 
 ### With `npx skills` (recommended)
 
@@ -91,9 +98,11 @@ the fallback lane, so nothing is required.
    ```
    Use es-orchestrator to set up the orchestrator workflow for this repo: plan = docs/plans/my-plan.md
    ```
-   Claude detects the stack, shows what it found, and asks only for what it could not work out: coding rules
-   (defaults / edit / replace / repo file only), gate commands, implementer lanes, reviewer model, batch size,
-   languages and staging paths. It then generates `.superpowers/sdd/<PLAN_ID>/`, runs a baseline gate and shows
+   **Quick path:** Claude detects the stack and drafts every answer it can (`detect_stack.py --draft-answers`), shows you a short
+   summary and what to double-check, and asks once: *use this draft / walk me through every question / change a few things*.
+   **Full interview:** it asks only for what detection could not settle: coding rules (defaults / edit / replace / repo file
+   only), gate commands and timeout, implementer lanes, reviewer model and where its agent is installed, batch size, languages,
+   staging paths and parallel pairs. Either way it then generates `.superpowers/sdd/<PLAN_ID>/`, runs a baseline gate and shows
    you the prompt for the next session.
 3. **Work**: ask for the whole cycle, or for one step (next section).
    ```
@@ -119,7 +128,7 @@ You do not have to run the full loop. Pick the step you want, and Claude runs on
 | `commit` | Confirms the gate is fresh, commits with explicit paths, updates the ledger and handoff | The commit exists and the books are updated | Review, dispatch |
 | `full` (default) | All four, over and over | You say stop | — |
 
-Other modes: **setup** (once per plan), **status** (done/left %, what is running) and **end of session**.
+Other modes: **setup** (once per plan), **status** (done/left %, stage, what is running) and **end of session**.
 
 How to ask:
 
@@ -129,6 +138,7 @@ Use es-orchestrator: orchestrate only, batches B14+B15
 /es-orchestrator review B14+B15
 Use es-orchestrator to review the uncommitted changes (review only)
 Use es-orchestrator: full cycle
+Use es-orchestrator: orchestrate B14+B15 in parallel      (or: sequential)
 ```
 
 Rules that hold in every mode:
@@ -137,10 +147,12 @@ Rules that hold in every mode:
   stops and tells you which mode to run first.
 - Every mode starts by checking the handoff against the real repo (`git log`, `git status`, running processes).
   If they differ, the repo wins.
-- Every mode ends by recording where the work stands and naming the next mode to run, for example
-  "Both batches implemented, not reviewed. Next: `review B14+B15`." That is what lets a different session
-  pick up the work.
-- Nothing is committed without you having the full review report, whatever the mode.
+- Every mode ends by recording where the work stands (`status.py --set-stage`: `PLANNED`, `IMPLEMENTED-UNREVIEWED`,
+  `REVIEWED-UNCOMMITTED`, `FIX-ROUND-NEEDED`, `COMMITTED`) and naming the next mode to run, for example
+  "Both batches implemented, not reviewed. Next: `review B14+B15`." That is what lets a different session pick up the work,
+  and `NEXT_SESSION_PROMPT.md` carries the mode into the next session.
+- Nothing is committed without you having the full review report, whatever the mode: `commit` checks that the report was
+  sent (an `OWNER_REPORT_SENT` marker written after `review` sends it).
 - With no plan folder yet, Claude offers **setup** first and does not start it silently.
 
 Typical ways to use the modes:
@@ -152,6 +164,37 @@ Typical ways to use the modes:
 | Let implementers work overnight and review in the morning | `orchestrate`, later `review` |
 | Get a strict second opinion on changes you or another tool wrote | `review` on the working tree or a commit range |
 | Commit after you have read the report and agree | `commit` |
+
+## Parallel pairs (git worktrees)
+
+A normal pair runs batch A, then batch B on top of A's uncommitted work. A **parallel pair** runs A and B **at the same time**,
+each in its own git worktree, so the pair takes the time of the slower batch. After the implementers finish, the orchestrator
+**lands** both on the main tree, runs the combined gate, and from there the review, the report and the commit are exactly the
+same as for a sequential pair.
+
+```
+HEAD ─┬─▶ worktree A ─▶ implementer A ─▶ snapshot ─┐
+      └─▶ worktree B ─▶ implementer B ─▶ snapshot ─┴─▶ land ─▶ combined gate ─▶ review ─▶ commit ─▶ remove worktrees
+```
+
+When it is used (all must hold, otherwise the pair simply runs sequentially):
+
+- `PARALLEL_PAIRS` is `auto` (the default; `off` disables it), or you said "in parallel".
+- The survey tagged the pair `PARALLEL-OK`: **disjoint files** and no dependency between the two batches.
+- The previous pair is **committed** (worktrees start from HEAD).
+- The batches do not share a port, database or container (or the stack-lock gate snippet is on).
+- A fresh checkout can build: set `WORKTREE_SETUP_CMD` (`npm ci`, `flutter pub get`, … detection suggests it).
+
+What `scripts/worktree.py` does (only the orchestrator runs it): `add` creates the worktrees outside the repo
+(`<repo>.worktrees/<PLAN_ID>/<id>`), copies the local files you listed in `WORKTREE_COPY_FILES` and runs the setup command;
+`snapshot` records each batch's changed files and checks the implementer's gate log is newer than its edits; `land` applies both
+to the main tree and **refuses, changing nothing**, when HEAD moved, the files overlap, the gate evidence is stale or a patch does
+not apply (then the pair falls back to sequential); `remove` cleans up after the commit. Details and fix-round rules:
+`references/parallel-pairs.md`.
+
+Good to know: parallel pairs save time, not tokens (two sessions use quota at once); copying `.env`-style files into a worktree
+is an owner decision recorded at setup; an integration gate run by the orchestrator is the first time A and B are tested together,
+and the reviewer is told to judge their interactions.
 
 ## How a cycle works
 
@@ -211,8 +254,8 @@ Why it is built this way:
   runs/<batch>/                START marker, result.json, REPORT.md, gate.log, live-checks.log
 ```
 
-Setup also installs a per-plan reviewer agent into `~/.claude/agents/` (it asks first, because that is user-level
-configuration).
+Setup also installs a per-plan reviewer agent into the project's `.claude/agents/` (it asks first; `REVIEWER_AGENT_SCOPE: user` uses
+`~/.claude/agents/` instead). It suggests excluding it locally with `.git/info/exclude` so it is not committed.
 
 ## Implementer lanes
 
@@ -225,6 +268,31 @@ A lane is one implementer model reached through one delegate skill, plus a fallb
 Setup asks for your lane order. When a lane hits a quota limit, Claude switches to its fallback with the same brief
 and tells you in one line. Details: `references/lanes.md`.
 
+## Health check, upgrades and tests
+
+```bash
+python3 <skill dir>/scripts/doctor.py --repo . --plan-id <PLAN_ID>      # install + plan-folder health
+python3 <skill dir>/scripts/status.py --repo . --plan-id <PLAN_ID>      # done/left %, stage, runs, worktrees
+python3 <skill dir>/scripts/worktree.py list --repo . --plan-id <PLAN_ID>
+```
+
+`doctor.py` checks the tools, delegate CLIs, required files, the gate script syntax, unfilled placeholders, `.gitignore`, the
+reviewer agent, the baseline gate, stale runs and leftover worktrees. `status.py` flags runs that look dead (older than 6 hours or
+whose pid is gone).
+
+**Upgrading a plan folder created by an older version:** update the skill (`npx skills update es-orchestrator`), then add the new
+helper scripts with `scaffold.py --upgrade-static --repo . --plan-id <PLAN_ID>`. Your `check.sh` is never overwritten (it holds your
+gate commands); merge the new timeouts, cleanup and secret scan from `templates/check.sh`, or regenerate it with your original
+answers (`--only check.sh --force`).
+
+**What the gate (`check.sh`) does:** secrets-tracked check, migrations untouched, build, lint, format on changed files, tests against
+known failures, function length, forbidden patterns and secrets in **added lines** (a rule named `~name` ignores strings and
+comments), locale parity (keys, empty values and placeholders for `.json`/`.arb`/`.properties`/`.strings`), stack snippets and
+optional e2e. Every build/lint/test/e2e command has a timeout (`GATE_TIMEOUT_SECONDS`, default 1800); the temp folder is removed
+on exit (and falls back to a folder in the plan dir when the system temp is not writable).
+
+**Tests:** `python3 -m unittest discover -s tests -v` runs the suite (scripts, gate, worktree flow). CI runs it on Linux and macOS.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -236,11 +304,17 @@ and tells you in one line. Details: `references/lanes.md`.
 | `TOOL NOT FOUND` in the gate log | The toolchain is missing from `PATH`. Fix `PATH` in `check.sh`, then re-run the gate. It is not a code finding. |
 | A scaffold run refuses to overwrite | The plan folder exists. Use the session modes, or ask for a re-scaffold with `--force` (backups are written as `*.bak-<date>`). |
 | Handoff and repo disagree | The repo wins. Claude writes a ledger line saying what it found. |
+| `worktree.py land` refuses | Read the message: HEAD moved, overlapping files, stale gate evidence or a patch that does not apply. Run that pair sequentially (`references/parallel-pairs.md` → *Fall back to sequential*). |
+| `worktree.py add` says the tree is dirty | Parallel pairs start from HEAD: commit (or finish) the previous pair first. |
+| A worktree setup failed | See `runs/<id>/worktree-setup.log`; fix `WORKTREE_SETUP_CMD` or run the pair sequentially. |
+| A gate command hangs | It is killed after `GATE_TIMEOUT_SECONDS` and reported as TIMED OUT; raise the limit if the command is legitimately slow. |
+| Unknown key warning from `scaffold.py` | A typo in `answers.json` (the message suggests the right key). |
 
 ## Customize
 
 - **Rules**: edit `profiles/<stack>/coding-rules.md`, or choose "edit" / "replace" during setup.
-- **A new stack**: add `profiles/<name>/` with the same six files. `generic` is always the base.
+- **A new stack**: add `profiles/<name>/` with `defaults.json` and any of `coding-rules.md`, `checkpoints.md`, `performance-checklist.md`,
+  `self-check.md`, `gate-hooks.md` (missing files are skipped). `generic` is always the base.
 - **More gates**: drop a snippet into `profiles/<stack>/gate-snippets/` (it is sourced by `check.sh`; `pre-*`
   snippets run before the build).
 
@@ -248,7 +322,7 @@ and tells you in one line. Details: `references/lanes.md`.
 
 | Path | What |
 | --- | --- |
-| `SKILL.md` | Mode router (setup / plan / orchestrate / review / commit / full / status / end) and the non-negotiables |
+| `SKILL.md` | Mode router (setup / plan / orchestrate / review / commit / full / status / end), host fallbacks and the non-negotiables |
 | `references/run-modes.md` | The single-step modes: entry checks, steps, stop conditions |
 | `references/` | Setup flow, answers schema, session loop, end-of-session, lanes, pairing & review, git & gates, owner decisions |
 | `templates/` | Files copied into the plan folder |
@@ -257,6 +331,10 @@ and tells you in one line. Details: `references/lanes.md`.
 | `scripts/scaffold.py` | Generates the plan folder from `answers.json` |
 | `scripts/status.py` | Exact done/left % (by count and effort), phases, running runs |
 | `scripts/archive.py` | End-of-session trimming of the handoff and the ledger |
+| `scripts/worktree.py` | Parallel-pair worktrees: add, snapshot, land, remove, list |
+| `scripts/doctor.py` | Health check of the install and a plan folder |
+| `references/parallel-pairs.md` | When and how a pair runs in parallel worktrees |
+| `tests/` | Unit and end-to-end tests (`python3 -m unittest discover -s tests`) |
 
 ## License
 

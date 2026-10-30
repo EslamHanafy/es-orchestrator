@@ -19,6 +19,14 @@
 - Commits: disjoint file sets → two commits, A first. If the sets overlap, or a fix round edits both → one
   combined commit naming both.
 
+## Parallel pairs
+
+When the survey tags a pair `PARALLEL-OK`, A and B run at the same time in separate git worktrees and are landed together
+(`parallel-pairs.md`). Nothing else about the pair changes: ONE reviewer cycle, BASE = the commit before A, disjoint
+commits or one combined commit. What differs is the evidence: file ownership comes from `runs/<id>/files.txt` (mtimes are
+meaningless after landing), each implementer's freshness proof is `runs/<id>/SNAPSHOT.json`, and the first run of A+B together is
+the orchestrator's `integration-gate.log`, which the reviewer verifies. The reviewer judges cross-batch interactions itself.
+
 ## Reviewer
 
 - **Fresh** strong-model subagent per pair (`REVIEWER_AGENT`, `REVIEWER_MODEL`, effort `REVIEWER_EFFORT`). It runs

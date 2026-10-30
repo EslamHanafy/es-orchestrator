@@ -26,7 +26,8 @@ them. The owner picks the mode in plain words ("plan only", "just review A+B"), 
 2. If the request is vague ("work on the plan"), ask one AskUserQuestion with the five modes, `full` first.
 3. If the repo has no `$W` folder, no mode can run. Say so and offer **Setup** first. Setup is a prerequisite, not
    a stage, and it is never run silently.
-4. Optional targets after the mode: a phase (`plan phase 3`), batch ids (`orchestrate B14+B15`,
+4. Optional words after the mode: `parallel` or `sequential` (for `orchestrate`/`full`: force or forbid worktrees for the pair,
+   overriding `PARALLEL_PAIRS`), a target: a phase (`plan phase 3`), batch ids (`orchestrate B14+B15`,
    `review B14+B15`) or a commit range (`review abc123..HEAD`). Without a target, take the NEXT item from the
    handoff.
 
@@ -39,9 +40,11 @@ them. The owner picks the mode in plain words ("plan only", "just review A+B"), 
   not relax any rule of the stages it keeps.
 - Do not do another stage "while you are here". If a mode finds the previous stage is incomplete (no brief, no
   report, findings still open), stop and say which mode to run first.
-- Finish by recording where the work stands, so a different session can pick up with the next mode: one ledger
-  line in `progress.md` and the session line of LIVE STATUS, naming the stage reached
-  (`PLANNED`, `IMPLEMENTED-UNREVIEWED`, `REVIEWED-UNCOMMITTED`, `COMMITTED`).
+- Finish by recording where the work stands, so a different session can pick up with the next mode: run
+  `python3 $ES/scripts/status.py --repo . --plan-id <PLAN_ID> --set-stage <STAGE> --next-mode "<mode + target>"`
+  (stages: `PLANNED`, `IMPLEMENTED-UNREVIEWED`, `REVIEWED-UNCOMMITTED`, `FIX-ROUND-NEEDED`, `COMMITTED`), then write one
+  ledger line in `progress.md` and the STAGE line of the LIVE STATUS block. `status.py` prints the stage at the top of
+  every later session.
 - End with one line to the owner: what was done and the exact next mode to run
   (for example: "Both batches implemented, not reviewed. Next: `review B14+B15`.").
 
@@ -68,6 +71,11 @@ owner-reserved decision blocks it. Show the owner the batch order, the pairs and
 Entry check: each batch to run has a brief that was re-checked in this session, BASE matches `git log -1`, and the
 working tree holds nothing unexplained (`git status`). If a brief is stale or missing, stop and name `plan`.
 
+0. **Parallel or sequential?** Run the pair in git worktrees at the same time when the survey tags it `PARALLEL-OK`,
+   `PARALLEL_PAIRS` is not `off`, the previous pair is committed and no shared port/database is involved
+   (`parallel-pairs.md`, which has the exact steps: add → dispatch both → snapshot → land). In that case this mode ends
+   with the pair **landed** in the main tree and the integration gate written to `runs/<B>/integration-gate.log`.
+   Otherwise follow steps 1–5.
 1. Load the delegate skill of the lane once (`lanes.md`).
 2. Dispatch pair A, wait for the notification (never poll), save its report to `runs/<A>/REPORT.md`, check
    completeness (per-ruling list, DECISIONS, every self-check line), and resume the same session for anything
@@ -76,7 +84,8 @@ working tree holds nothing unexplained (`git status`). If a brief is stale or mi
 4. Quota or limit error: use the lane's fallback with the same brief and tell the owner in one line.
 5. Rule the DECISIONS in both reports (`session-loop.md` §3).
 
-Done when: both reports are saved, complete and their DECISIONS are ruled. Do not read the reports as a review.
+Done when: both reports are saved, complete and their DECISIONS are ruled (parallel: and the pair is landed and the
+integration gate has run). Do not read the reports as a review.
 They are evidence for the reviewer. Stage reached: `IMPLEMENTED-UNREVIEWED`. Tell the owner the tree is uncommitted
 and not yet reviewed.
 
@@ -92,7 +101,8 @@ or in a named commit range. The check BASE is the commit before A. If there are 
    two or three findings and own the verdict (`session-loop.md` §6).
 3. FIX ROUND NEEDED: the report lists a fix brief. In this mode, stop and hand it over (see below). Running the
    fix is `orchestrate` on the fix brief, then `review` again with a NEW reviewer.
-4. `SendUserFile` the full report plus the plain-language summary (`session-loop.md` §7). Log the review cost.
+4. `SendUserFile` the full report plus the plain-language summary (`session-loop.md` §7), then
+   `touch $W/<A>+<B>-OWNER_REPORT_SENT` (the `commit` mode checks it). Log the review cost.
 
 Done when: the owner has the report file and the summary. Stage reached: `REVIEWED-UNCOMMITTED` when the verdict is
 clean, or `FIX-ROUND-NEEDED` with the fix brief path. Review mode never commits, even when the verdict is clean.
@@ -104,7 +114,8 @@ reviewer re-run the gate (the "untrusted evidence" rule in `pairing-and-review.m
 ## commit
 
 Entry check: the reviewer's last report says clean (or every finding is fixed and a fresh review confirmed it), the
-owner has the report file, and nothing is running. If not, stop and name `review`.
+owner has the report file (the `<A>+<B>-OWNER_REPORT_SENT` marker exists in `$W`) and nothing is running. If not, stop and
+name `review`.
 
 1. Gate freshness (`git-and-gates.md`): the gate passed on the tree being committed and no source file is newer than
    the gate log. Otherwise re-run the gate.
@@ -113,8 +124,8 @@ owner has the report file, and nothing is running. If not, stop and name `review
 3. Bookkeeping in the same turn (`session-loop.md` §9): ledger line, LIVE STATUS, plan status line and a
    lessons line when a new defect class was found.
 
-Done when: the commit exists and the books are updated. Stage reached: `COMMITTED`. Never push unless the owner
-asked.
+Done when: the commit exists and the books are updated. Remove the pair's worktrees if it ran in parallel
+(`worktree.py remove --all`). Stage reached: `COMMITTED`. Never push unless the owner asked.
 
 ## full
 

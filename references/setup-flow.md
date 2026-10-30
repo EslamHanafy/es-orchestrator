@@ -1,7 +1,18 @@
 # Setup flow (new project or new plan)
 
 Goal: a working `.superpowers/sdd/<PLAN_ID>/` folder, a baseline gate, decisions O-1…, and a next-session prompt.
-Do not write feature code during setup.
+Do not write feature code during setup. `$ES` = the skill directory (see SKILL.md).
+
+## Quick path (recommended for a first run)
+
+1. `python3 $ES/scripts/detect_stack.py <repo root> --draft-answers > answers.json` (write it to the scratchpad). The draft
+   holds everything detection could fill, safe defaults for the rest, and a `_confirm` list of what to check.
+2. Show the owner a short summary (stack, plan file, gate commands, lanes, reviewer, parallel pairs) and the `_confirm` list, then ask
+   once with AskUserQuestion: **Use this draft (Recommended)** / **Walk me through every question** / **Change a few things**.
+3. Apply their changes to answers.json and continue at "3. Generate". Coding rules default to the profile defaults; the owner can
+   still switch mode later.
+
+The full interview below is for owners who want to choose everything, and for stacks detection cannot read.
 
 ## 1. Detect, then look
 
@@ -33,6 +44,7 @@ Round 1: identity and scope
 Round 2: gates
 - Build, lint/analyze, format (explicit files only), unit tests, e2e/live check (curl suites, device run,
   Playwright …).
+- Gate timeout per command (`GATE_TIMEOUT_SECONDS`, default 1800; a hung build or test stops the gate instead of blocking it).
 - Function-length limit (default 60 for backend, 40 for mobile and web) and any other structural rule the gate
   should scan.
 - Extra gate snippets (`EXTRA_GATES`, from `profiles/<p>/gate-snippets/`): offer the ones that fit the detected
@@ -45,9 +57,15 @@ Round 2: gates
 Round 3: people and models
 - Implementer lanes, in order, with fallbacks (see `lanes.md`). Example: H = Haiku high via /claude-delegate, then
   /opencode-delegate Anthropic provider, then a plain Agent-tool Haiku; G = agy (evidence untrusted).
-- Reviewer: model (default opus), effort (default medium), agent name (default `<plan-id-lower>-reviewer`).
+- Reviewer: model (default opus), effort (default medium), agent name (default `<plan-id-lower>-reviewer`), and where it is
+  installed: `project` (`.claude/agents/`, default; offer `.git/info/exclude` so it stays local) or `user` (`~/.claude/agents/`).
 - Fact-map / survey helper model (default sonnet, read-only).
 - Batch size in minutes (default 30) and whether pairs are the default (yes).
+- **Parallel pairs** (`PARALLEL_PAIRS`: `auto` or `off`, default `auto`): explain it in one line ("disjoint pairs run at the same time in
+  git worktrees; same review and commit flow"). If the stack needs an install step in a fresh checkout, set
+  `WORKTREE_SETUP_CMD` (`npm ci`, `flutter pub get`, …; detection suggests it). If the build needs local untracked files (`.env`,
+  `google-services.json`), list them in `WORKTREE_COPY_FILES` and record that exact list as an O-row (owner-reserved). Mention the shared-
+  resource limit (ports, databases, containers): the stack-lock snippet or sequential pairs. See `parallel-pairs.md`.
 
 Round 4: git and safety
 - Base branch, work branch(es), worktree tracks if any.
@@ -75,12 +93,14 @@ Round 4: git and safety
    sessions follow them too.
    `check.sh`: replace each `HOOK:` block with the project's real commands (see `profiles/<stack>/gate-hooks.md`).
    Keep the contract: it prints one line per gate and ends with `ALL GATES PASS` or `GATES FAILED`.
-4. Reviewer agent: list `~/.claude/agents/` first. The name must be unique per plan (`<plan-id-lower>-reviewer`).
-   Reuse an existing agent only when it belongs to this same plan; never overwrite another plan's reviewer. Show
-   the owner `reviewer-agent.md`. On a yes, copy it to `~/.claude/agents/<name>.md`. To let
+4. Reviewer agent: list the target folder first (`.claude/agents/` for scope `project`, `~/.claude/agents/` for `user`). The name
+   must be unique per plan (`<plan-id-lower>-reviewer`). Reuse an existing agent only when it belongs to this same plan; never
+   overwrite another plan's reviewer. Show the owner `reviewer-agent.md`. On a yes, copy it to `<REVIEWER_AGENT_PATH>`. To let
    the reviewer edit without prompts, add project allow rules (Edit/Write on source dirs and the plan folder) to
    `.claude/settings.local.json`, but only with the owner's yes, because it is persistent configuration.
-5. Make sure `.superpowers/` is gitignored. If it is not, propose the one-line `.gitignore` change and wait for the
+5. Run `python3 $ES/scripts/doctor.py --repo <repo root> --plan-id <PLAN_ID>` and clear every ❌ (open hand-fill fields are
+   expected until step 4 below).
+6. Make sure `.superpowers/` is gitignored. If it is not, propose the one-line `.gitignore` change and wait for the
    owner's yes.
 
 ## 4. Baseline

@@ -49,12 +49,19 @@ the script, so do not set them.
   "FORBIDDEN_GIT": "stash, checkout, restore, reset, switch, worktree add/remove, push (unless asked)",
   "OWNER_NAME": "the owner",
   "CODING_RULES": {"mode": "default", "file": "docs/our-rules.md (only for mode=replace)"},
+  "PARALLEL_PAIRS": "auto (run PARALLEL-OK pairs in git worktrees) | off",
+  "WORKTREE_DIR": "(optional) where worktrees go; default <repo parent>/<repo name>.worktrees",
+  "WORKTREE_SETUP_CMD": "npm ci | flutter pub get | none (run once in each new worktree)",
+  "WORKTREE_COPY_FILES": [".env (optional list of local untracked files to copy into worktrees; owner-reserved)"],
+  "GATE_TIMEOUT_SECONDS": 1800,
+  "REVIEWER_AGENT_SCOPE": "project (.claude/agents/, default) | user (~/.claude/agents/)",
   "EXTRA_GATES": ["layering", "doc-comments", "pre-stack-lock", "suite-parse"],
   "COMMENT_POLICY": "(optional; profile default) how much to comment"
 }
 ```
 
-Derived (d): `PLAN_DIR` (`.superpowers/sdd/<PLAN_ID>`), `TODAY`, `LANES_TABLE` (markdown table),
+Derived (d): `PLAN_DIR` (`.superpowers/sdd/<PLAN_ID>`), `PLAN_ABS` (its absolute path), `REVIEWER_AGENT_PATH`,
+`WORKTREE_DIR_RESOLVED`, `TODAY`, `LANES_TABLE` (markdown table),
 `LANES_LIST` (one line per lane), `OWNER_RESERVED_LIST` (bullets), `PROFILE_NAMES`, `REPO_ROOT` (from `--repo`).
 
 `CODING_RULES.mode`: `default` = the profile rules as they are; `edit` = the profile rules, then edited with the
@@ -65,6 +72,11 @@ coding-rules.md, so the repo's rules file is the only source. Every mode except 
 `EXTRA_GATES`: names of `profiles/<p>/gate-snippets/<name>.sh` to copy into `gates.d/`. Backend: `layering`,
 `doc-comments`, `pre-stack-lock`, `suite-parse`. Mobile: `core-imports-features`, `generated-up-to-date`,
 `preview-isolation`. Snippets named `pre-*` run before the build; the rest run before e2e.
+
+Validation: `PLAN_ID` must be UPPER_SNAKE (`[A-Z][A-Z0-9_]{1,63}`), because it names a folder and branches. Keys that are not in
+this schema are reported as `UNKNOWN KEY (ignored)` with a "did you mean" hint. Keys starting with `_` (such as the `_confirm`
+list of a draft) are ignored on purpose. `scripts/detect_stack.py <repo> --draft-answers` prints a complete draft.
+`scaffold.py` also writes `<plan>/config.json` (the worktree, timeout and reviewer-agent settings) for `worktree.py` and `doctor.py`.
 
 Rules of thumb
 - Use `"none"` rather than leaving a key out. A missing key stays as `{{KEY}}` and is reported as UNFILLED.

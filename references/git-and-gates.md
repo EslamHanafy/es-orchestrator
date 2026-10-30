@@ -4,7 +4,8 @@
 
 Other sessions, implementers and reviewers share the checkout, so never run `git stash`, `checkout`, `restore`,
 `reset`, `switch`, `clean`, or `worktree add/remove` (unless the owner set up tracks), and never push unless the
-owner asks. To undo a format-only file, use `git show <BASE>:<path> > <path>`. Implementers and reviewers never
+owner asks. One exception: the **orchestrator** creates, lands and removes the short-lived worktrees of parallel pairs, only
+through `scripts/worktree.py` (`parallel-pairs.md`). To undo a format-only file, use `git show <BASE>:<path> > <path>`. Implementers and reviewers never
 run git commands that change files or the index; only the orchestrator stages and commits.
 
 Formatters run on explicit **files** only, never on a directory. Generated migrations, lockfiles produced by
@@ -25,7 +26,9 @@ git status --porcelain -uall -- <STAGE_PATHS> | awk '{print $2}' | tr '\n' '\0' 
 
 ## Gate freshness rule (before every commit)
 
-1. The gate log being relied on ran on **this** tree: B's final full gate for a pair, or the orchestrator's own run.
+1. The gate log being relied on ran on **this** tree: B's final full gate for a pair, or the orchestrator's own run. For a
+   parallel pair that is `runs/<B>/integration-gate.log`, run by the orchestrator after landing (the implementers gated only their own
+   trees).
 2. `find <SOURCE_DIRS> -newer runs/<id>/gate.log -type f` is **empty**. If anything is newer (a reviewer fix, your
    follow-up), re-run the gate.
 3. If the implementer's final gate failed and the reviewer re-ran only a subset, run the full gate yourself.
