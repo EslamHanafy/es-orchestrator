@@ -50,10 +50,10 @@ class Report:
 
 def environment(rep: Report, repo: Path):
     """Check the tools the skill and its scripts need."""
-    if sys.version_info >= (3, 8):
+    if sys.version_info >= (3, 9):
         rep.ok(f"python {sys.version.split()[0]}")
     else:
-        rep.fail(f"python {sys.version.split()[0]} is too old (need 3.8+)")
+        rep.fail(f"python {sys.version.split()[0]} is too old (need 3.9+)")
     for tool, needed in (("git", True), ("bash", True), ("node", False)):
         found = shutil.which(tool)
         (rep.ok if found else rep.fail if needed else rep.warn)(

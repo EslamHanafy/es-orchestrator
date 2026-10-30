@@ -30,7 +30,7 @@ included). The coding rules ship as defaults that you keep, edit or replace duri
 
 ## Install
 
-Requirements: `git`, `bash` and `python3` 3.8+ (standard library only) on your machine, and Node.js for `npx`. macOS and Linux
+Requirements: `git`, `bash` and `python3` 3.9+ (standard library only) on your machine, and Node.js for `npx`. macOS and Linux
 are supported; on Windows use WSL.
 
 > **Built for Claude Code.** The workflow uses Claude Code's `AskUserQuestion`, `SendUserFile`, `Agent` (subagents) and background
@@ -291,7 +291,7 @@ comments), locale parity (keys, empty values and placeholders for `.json`/`.arb`
 optional e2e. Every build/lint/test/e2e command has a timeout (`GATE_TIMEOUT_SECONDS`, default 1800); the temp folder is removed
 on exit (and falls back to a folder in the plan dir when the system temp is not writable).
 
-**Tests:** `python3 -m unittest discover -s tests -v` runs the suite (scripts, gate, worktree flow). CI runs it on Linux and macOS.
+**Tests:** `python3 -m unittest discover -s tests -v` runs the suite (scripts, gate, worktree flow). CI runs it on Linux (Python 3.12) and macOS (3.9 and 3.12).
 
 ## Troubleshooting
 
