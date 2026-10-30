@@ -5,7 +5,7 @@ Do not write feature code during setup.
 
 ## 1. Detect, then look
 
-Run `python3 ~/.claude/skills/es-orchestrator/scripts/detect_stack.py <repo root>`. It prints suggested
+Run `python3 $ES/scripts/detect_stack.py <repo root>`. It prints suggested
 `PROFILES` (backend / mobile / web; generic when nothing matches), per-stack gate commands, locale files, rules
 files, plan candidates, test folders, the current branch, and whether the repo is a monorepo. Then read the rules
 file, the plan file and the build files yourself to confirm. Pre-fill every answer you can and ask only for what is
@@ -59,7 +59,7 @@ Round 4: git and safety
 ## 3. Generate
 
 1. Write `answers.json` (schema in `answers-schema.md`) into the scratchpad.
-2. `python3 ~/.claude/skills/es-orchestrator/scripts/scaffold.py --answers <answers.json> --repo <repo root>`
+2. `python3 $ES/scripts/scaffold.py --answers <answers.json> --repo <repo root>`
    - It refuses to overwrite an existing folder unless you pass `--force`. Never use `--force` on a live plan
      without the owner's OK. The script backs up overwritten files as `*.bak-<date>`.
    - `UNFILLED:` lists setup keys missing from answers.json. Add them and re-run with `--force`.

@@ -1,6 +1,9 @@
 # Session loop (resume → dispatch → review → commit → books)
 
-`$W` = `.superpowers/sdd/<PLAN_ID>` below.
+`$W` = `.superpowers/sdd/<PLAN_ID>` below. `$ES` = the skill's own directory (see SKILL.md).
+
+This file is the `full` mode. Single-step modes run a slice of it: plan = §1–4, orchestrate = §5, review = §6–7,
+commit = §8–9 (`run-modes.md`).
 
 ## 1. Resume
 
@@ -17,7 +20,7 @@ reality wins. Write one ledger line saying what you found.
 
 ## 2. Status first
 
-Before any work, run `python3 ~/.claude/skills/es-orchestrator/scripts/status.py --repo . --plan-id <PLAN_ID>` and
+Before any work, run `python3 $ES/scripts/status.py --repo . --plan-id <PLAN_ID>` and
 tell the owner in plain words:
 - done / left as % by task count **and** by effort (from status.py; tag plan tasks `[S]`/`[M]`/`[L]`/`[XL]` or
   `[effort: N]` to get real effort weights), plus the phases closed and the phase open;

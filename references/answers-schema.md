@@ -29,11 +29,11 @@ the script, so do not set them.
   "LOCALE_FILES": "src/i18n/en.json, src/i18n/ar.json",
   "LANES": [
     {"id": "H", "name": "Haiku high via /claude-delegate", "when": "every batch and fix round",
-     "command": "node ~/.claude/skills/claude-delegate/scripts/relay.mjs --brief <b> --cd <tree> --model claude-haiku-5-5 --effort high --timeout 2h --out-dir <runs/id>",
+     "command": "node <claude-delegate skill dir>/scripts/relay.mjs --brief <b> --cd <tree> --model claude-haiku-5-5 --effort high --timeout 2h --out-dir <runs/id>",
      "resume": "--session <sessionId from result.json>",
      "fallback": "OpenCode Anthropic provider, then a plain Agent-tool Haiku"},
     {"id": "G", "name": "agy (Gemini)", "when": "only when H is out of quota",
-     "command": "node ~/.claude/skills/agy-delegate/scripts/relay.mjs --brief <b> --cd <tree> --out-dir <runs/id>",
+     "command": "node <agy-delegate skill dir>/scripts/relay.mjs --brief <b> --cd <tree> --out-dir <runs/id>",
      "resume": "--conversation <id from result.json>",
      "fallback": "H", "untrusted_evidence": true}
   ],

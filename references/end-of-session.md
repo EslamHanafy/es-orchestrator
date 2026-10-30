@@ -37,7 +37,7 @@ Give the owner the prompt **in chat** as well. It is what they paste into the ne
 
 ## 3. Archive trimming (keep the handoff readable)
 
-Run `python3 ~/.claude/skills/es-orchestrator/scripts/archive.py --repo . --plan-id <PLAN_ID> --session <N>` as a
+Run `python3 $ES/scripts/archive.py --repo . --plan-id <PLAN_ID> --session <N>` as a
 dry run, check the counts, then repeat it with `--apply`. It backs up both files and moves the old LIVE STATUS
 blocks and the ledger lines older than the last two sessions. Do the rest by hand:
 
