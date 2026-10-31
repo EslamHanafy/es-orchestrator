@@ -95,8 +95,11 @@ removed.* Record "dropped, no measured gain" as a ruling so nobody rebuilds it.
 
 Gate scripts, helpers, compose files and proxies are code: change them **one step at a time, each with its proof log**
 (`runs/<task>/<step>.log`), then a **fresh strong-model review of the tooling diff and the proofs** before any gate relies on
-it. Gate scripts survive signals and missing settings: a TERM stops the running command before its slot is freed, cleanup
-runs with `set +u`, and required settings are checked before anything is stopped. Repo files (compose, proxy config, Dockerfile, test support) go through lane batches with a FULL review; the orchestrator
+it. Gate scripts survive signals and missing settings: long steps run background + wait so a signal is handled at once, a TERM
+stops the running command before its slot is freed, cleanup ignores further signals and runs with `set +u`, the restore
+runs shielded (own session, hard timeout) because compose re-enables SIGINT, and required
+settings are checked before anything is stopped. *A second Ctrl-C killed a restore mid-build and the lock was released anyway.*
+A sentinel matches database-shaped errors only. *A bare "Connection refused" pattern failed passing gates on curl output.* Repo files (compose, proxy config, Dockerfile, test support) go through lane batches with a FULL review; the orchestrator
 edits only its own gitignored gate files. *The first tooling review found a sentinel that passed blind, a restore on the skip
 path and a trap chain broken by the new lock — all invisible in green gate runs.* Gate probes follow env-name renames: grep the
 gate for every renamed key. *A readiness probe still read a renamed key, and E2E silently never ran through the gate.*

@@ -45,9 +45,21 @@ G=(git -c core.quotepath=off -c diff.noprefix=false -c diff.mnemonicPrefix=false
 # Temp dir: the system one, or a folder in the plan dir when the sandbox forbids it. Removed on exit (ES_KEEP_TMP=1 keeps it).
 OUT="$(mktemp -d 2>/dev/null)" || OUT="$(mktemp -d "$HERE/.gate-tmp.XXXXXX")" || { echo "cannot create a temp dir"; exit 2; }
 TIMED_PID=""
+# The gate's own stdout/stderr, kept on fds 8/9: an exit trap can fire while a step's output is redirected to a temp file,
+# and cleanup's messages ("could not restore …") must still reach the user.
+exec 8>&1 9>&2
 cleanup() {
-  # A test or e2e command still running (the gate was signalled) is stopped first, so its slot is never freed under it.
-  [[ -n "$TIMED_PID" ]] && { kill -TERM "$TIMED_PID" 2>/dev/null; wait "$TIMED_PID" 2>/dev/null; }
+  exec 1>&8 2>&9
+  # A second Ctrl-C / TERM must not abort the cleanup (a restore or a lock release half done); its children inherit this.
+  trap '' INT TERM HUP
+  # A command still running (the gate was signalled) is stopped and waited for (bounded) first, so its slot is never freed
+  # under it. jobs -pr lists RUNNING jobs only (a finished job's pid may already be reused); it also catches a command
+  # started just before TIMED_PID was recorded.
+  local job
+  # The job's children too: a job that is a shell waiting on a foreground command (a wrapped ensure-up) defers its trap.
+  for job in $(jobs -pr); do pkill -TERM -P "$job" 2>/dev/null; kill -TERM "$job" 2>/dev/null; done
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [[ -z "$(jobs -pr)" ]] && break; sleep 0.5; done
+  [[ -z "$(jobs -pr)" ]] && wait 2>/dev/null   # reap; never block on a job that ignored the TERM
   gate_hook on_exit
   [[ -n "${LOCK_DIR:-}" && "$(cat "$LOCK_DIR/pid" 2>/dev/null)" == "$$" ]] && rm -rf "$LOCK_DIR"
   [[ -z "${ES_KEEP_TMP:-}" ]] && rm -rf "$OUT"
@@ -67,10 +79,13 @@ set_or_none() { [[ -n "$1" && "$1" != "none" ]]; }
 # on_exit. A before_* hook may set GATE_SKIP_TESTS=1 / GATE_SKIP_E2E=1 (after calling fail) to stop that phase from running.
 gate_hook() { declare -F "gate_$1" > /dev/null && "gate_$1"; return 0; }
 GATE_SKIP_TESTS=0; GATE_SKIP_E2E=0
-# timed <command…>: run with the wall-clock limit (exit 124 on timeout). Kills the whole process group.
+# timed <command…>: run with the wall-clock limit (exit 124 on timeout). Kills the whole process group. stdin is /dev/null.
+# shielded <seconds> <command…>: for a step that must finish during cleanup (a restore): own session, so a terminal Ctrl-C
+# never reaches it; only the timeout stops it.
+shielded() { local t="$1"; shift; python3 "$HERE/run_timeout.py" --shield "$t" -- "$@" < /dev/null; }
 # Runs in the background + wait, so a signal to the gate is handled at once and cleanup() can stop the command.
 timed() {
-  python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@" &
+  python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@" < /dev/null &   # gate commands never read the terminal
   TIMED_PID=$!
   wait "$TIMED_PID"; local code=$?
   TIMED_PID=""

@@ -481,7 +481,8 @@ _stack_lock_wait_and_take() {
       _stack_lock_leave_queue
       return 1
     fi
-    sleep "$poll"
+    # Background + wait: an INT/TERM trap runs at once instead of after the sleep.
+    sleep "$poll" & wait $!
     waited=$((waited + poll))
   done
 }

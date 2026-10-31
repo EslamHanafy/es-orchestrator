@@ -193,7 +193,14 @@ _run_slot_break_stale() {
   # left by a crashed breaker expires after the ownerless grace. Busy mutex = skip this round; the next poll retries.
   mutex="$(_run_slot_root)/.takeover"
   if ! mkdir "$mutex" 2>/dev/null; then
-    age=$(_run_slot_age_sec "$mutex") && [ "$age" -gt "$RUN_SLOT_INIT_GRACE_SEC" ] && rm -rf "$mutex"
+    # A leaked mutex is broken like a slot: renamed to a private name first, so two breakers never remove a fresh one.
+    age=$(_run_slot_age_sec "$mutex") && [ "$age" -gt "$RUN_SLOT_INIT_GRACE_SEC" ] \
+      && mv "$mutex" "$mutex.broken.$$" 2>/dev/null || return 0
+    # Judged again after the rename: a fresh mutex (another breaker's) is put back, never removed.
+    age=$(_run_slot_age_sec "$mutex.broken.$$") || return 0
+    if [ "$age" -gt "$RUN_SLOT_INIT_GRACE_SEC" ]; then rm -rf "$mutex.broken.$$"
+    # Never over a mutex re-created meanwhile (mv would nest the copy inside it).
+    elif [ -e "$mutex" ] || ! mv "$mutex.broken.$$" "$mutex" 2>/dev/null; then rm -rf "$mutex.broken.$$"; fi
     return 0
   fi
   graveyard="$slot.broken.$$"
@@ -233,12 +240,14 @@ _run_slot_try_take() {
     _run_slot_break_stale "$slot"
     mkdir "$slot" 2>/dev/null || return 1
   fi
+  # Recorded at once: an exit signal before the owner write still releases the slot we just created.
+  RUN_SLOT_HELD="$slot"
   # A slot whose owner file could not be written would look owner-less and be taken over after the grace: give it back.
   if ! _run_slot_write_owner "$slot" "$label"; then
+    RUN_SLOT_HELD=""   # cleared first: once removed, the name may be another acquirer's
     rm -rf "$slot"
     return 1
   fi
-  RUN_SLOT_HELD="$slot"
   export ES_RUN_SLOT_OWNER_PID="$$"
   return 0
 }
@@ -353,7 +362,8 @@ _run_slot_wait_and_take() {
       echo "run slot: still busy after ${waited}s (waiting for '$label')." >&2
       return 1
     fi
-    sleep "$poll"
+    # Background + wait: an INT/TERM trap runs at once instead of after the sleep.
+    sleep "$poll" & wait $!
     waited=$((waited + poll))
   done
 }
@@ -393,7 +403,10 @@ run_slot_acquire() {
 # -----------------------------------------------------------------------------
 run_slot_release() {
   [ -n "$RUN_SLOT_HELD" ] || return 0
-  if [ "$(_run_slot_read_key "$RUN_SLOT_HELD/$RUN_SLOT_OWNER_FILE" pid)" = "$$" ]; then
+  local owner
+  owner="$(_run_slot_read_key "$RUN_SLOT_HELD/$RUN_SLOT_OWNER_FILE" pid)"
+  # Ours when it names this pid, or when it has no owner yet (we created it and were stopped before the owner write).
+  if [ "$owner" = "$$" ] || { [ -z "$owner" ] && [ -d "$RUN_SLOT_HELD" ]; }; then
     rm -rf "$RUN_SLOT_HELD"
   fi
   RUN_SLOT_HELD=""

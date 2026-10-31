@@ -11,14 +11,17 @@ source "$HERE/helpers/run_slot.sh"
 SS_SECRET_FILE="$HERE/.testdb-password"
 SS_E2E_STARTED=0
 # The MAIN tree: the base app is restored from its compose files and code, never from the worktree being gated.
-SS_MAIN_ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"; export SS_MAIN_ROOT
-# Postgres errors that mean the database dropped or refused connections (terminated, crash of another backend, recovering
-# or starting up, too many clients), plus a refused TCP connect.
-SS_DB_KILL_RE='57P01|57P02|57P03|53300|too many clients|terminating connection|recovery mode|is starting up|Connection refused'
+SS_MAIN_ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)"; export SS_MAIN_ROOT
+# Database-shaped errors only, meaning the database dropped or refused connections (terminated, crash of another backend,
+# recovering / starting up, too many clients). The server's own message texts are specific enough whatever prefix a
+# driver adds (psql, JDBC, Npgsql, node-pg, pgx, lib/pq "pq: ...", psycopg/psycopg2, SQLAlchemy, asyncpg), plus node-pg's
+# separate "code: '57P01'" line. Ordinary test output ("Connection refused" from curl, "...:53300: address in use",
+# "item 53300: ok") must not match, nor a disconnect by the app's own idle timeouts ("due to idle-session timeout").
+SS_DB_KILL_RE="terminating connection (due to (administrator command|conflict with recovery|unexpected postmaster exit)|because of crash)|sorry, too many clients already|remaining connection slots are reserved|the database system is (starting up|not yet accepting connections|not accepting connections|in recovery mode|shutting down)|code: +.(57P0[123]|53300)."
 
 # A missing setting must fail here, before anything is stopped, not as an "unbound variable" mid-swap.
 SS_MISSING=""
-for v in ES_RUN_SLOTS ES_STACK_LOCK_DIR SS_TESTDB_COMPOSE SS_TESTDB_CONTAINER SS_TESTDB_PORT SS_TESTDB_USER \
+for v in SS_MAIN_ROOT ES_RUN_SLOTS ES_STACK_LOCK_DIR SS_TESTDB_COMPOSE SS_TESTDB_CONTAINER SS_TESTDB_PORT SS_TESTDB_USER \
   SS_TESTDB_MAX_CONNECTIONS SS_TESTDB_ENV_NAME SS_TESTDB_CONN_FORMAT SS_TESTDB_RANDOM_PAGE_COST \
   SS_TESTDB_EFFECTIVE_CACHE_SIZE SS_STACK_DB_CONTAINER SS_E2E_STOP SS_E2E_UP SS_E2E_RESTORE SS_PROXY_RESTART \
   SS_JOB_LOCK_CMD SS_JOB_LOCK_WAIT_SEC; do
@@ -40,7 +43,8 @@ ss_healthy() { [[ "$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/nu
 ss_ensure_testdb() {
   # Written beside the target and moved in without overwriting, so two first-run gates agree on one password.
   if [[ ! -s "$SS_SECRET_FILE" ]]; then
-    ( umask 077; openssl rand -hex 24 > "$SS_SECRET_FILE.$$" ) && mv -n "$SS_SECRET_FILE.$$" "$SS_SECRET_FILE"
+    # ln is atomic and fails when the file exists (macOS mv -n is check-then-rename).
+    ( umask 077; openssl rand -hex 24 > "$SS_SECRET_FILE.$$" ) && ln "$SS_SECRET_FILE.$$" "$SS_SECRET_FILE" 2>/dev/null
     rm -f "$SS_SECRET_FILE.$$"
   fi
   [[ -s "$SS_SECRET_FILE" ]] || return 1
@@ -49,17 +53,23 @@ ss_ensure_testdb() {
   # shellcheck disable=SC2059
   export "$SS_TESTDB_ENV_NAME=$(printf "$SS_TESTDB_CONN_FORMAT" "$SS_TESTDB_PORT" "$SS_TESTDB_USER" "$SS_TESTDB_PASSWORD")"
   if ! ss_healthy "$SS_TESTDB_CONTAINER"; then
-    docker compose -f "$SS_TESTDB_COMPOSE" up -d --no-recreate --wait --wait-timeout 120 > "$OUT/testdb-up.txt" 2>&1 || return 1
+    timed docker compose -f "$SS_TESTDB_COMPOSE" up -d --no-recreate --wait --wait-timeout 120 > "$OUT/testdb-up.txt" 2>&1 || return 1
   fi
-  ss_testdb_auth_ok || { echo "the test DB rejects the password in $SS_SECRET_FILE (its volume was created with another one):" \
-    "drop the TEST DB volume (docker compose -f $SS_TESTDB_COMPOSE down -v) and re-run" > "$OUT/testdb-up.txt"; return 1; }
+  ss_testdb_auth_ok && return 0
+  # Only a real password mismatch gets the drop-the-volume advice; anything else (too many clients, starting up) is shown.
+  if grep -qE '28P01|password authentication failed' "$OUT/testdb-auth.txt"; then
+    echo "the test DB rejects the password in $SS_SECRET_FILE (its volume was created with another one):" \
+      "drop the TEST DB volume (docker compose -f $SS_TESTDB_COMPOSE down -v) and re-run" > "$OUT/testdb-up.txt"
+  else { echo "test DB login check failed:"; tail -5 "$OUT/testdb-auth.txt"; } > "$OUT/testdb-up.txt"; fi
+  return 1
 }
 
 # ss_testdb_auth_ok: log in with the generated password over TCP on the container's own address (loopback is trust in the
 # official image, so it would accept any password). PGPASSWORD is passed by name from the environment, never on a command line.
 ss_testdb_auth_ok() {
   PGPASSWORD="$SS_TESTDB_PASSWORD" docker exec -e PGPASSWORD -e U="$SS_TESTDB_USER" "$SS_TESTDB_CONTAINER" \
-    sh -c 'psql -h "$(hostname -i | cut -d" " -f1)" -U "$U" -d postgres -tAc "select 1"' 2>/dev/null | grep -q 1
+    sh -c 'psql -h "$(hostname -i | cut -d" " -f1)" -U "$U" -d postgres -tAc "select 1"' > "$OUT/testdb-auth.txt" 2>&1 \
+    && grep -qx 1 "$OUT/testdb-auth.txt"
 }
 
 # ss_shared_ensure: each "<health>|<ensure-up>" pair whose health check fails runs its ensure-up under a SHORT wrapped lock.
@@ -68,8 +78,11 @@ ss_shared_ensure() {
   for pair in ${SS_SHARED_ENSURE[@]+"${SS_SHARED_ENSURE[@]}"}; do
     bash -c "${pair%%|*}" > /dev/null 2>&1 && continue
     echo "shared ensure-up: taking the stack lock briefly (waits while another tree runs E2E)"
-    bash "$HERE/helpers/stack_lock.sh" run "check.sh ensure-up" bash -c "${pair#*|}" >> "$OUT/ensure-up.txt" 2>&1 \
-      || { echo "⚠  ensure-up failed: ${pair#*|}"; tail -5 "$OUT/ensure-up.txt"; }
+    # The lock wait has the lock's own timeout (an E2E elsewhere may hold it long); only the ensure-up itself is under
+    # GATE_TIMEOUT. Background + wait: a signal is handled at once, and cleanup stops the job (its trap frees the lock).
+    bash "$HERE/helpers/stack_lock.sh" run "check.sh ensure-up" \
+      python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- bash -c "${pair#*|}" < /dev/null >> "$OUT/ensure-up.txt" 2>&1 &
+    wait $! || { echo "⚠  ensure-up failed: ${pair#*|}"; tail -5 "$OUT/ensure-up.txt"; }
   done
 }
 
@@ -80,7 +93,7 @@ ss_sentinel_start() {
   ss_db_identity "$container" > "$OUT/$name.before"
   ( while [[ ! -f "$OUT/$name.stop" ]] && kill -0 "$parent" 2>/dev/null; do
       echo "$(ss_sql "$container" 'select count(*) from pg_stat_activity')" >> "$OUT/$name.conn"; sleep 1
-    done ) < /dev/null > /dev/null 2>&1 &   # never holds the gate's output open (a dead, unreaped gate still passes kill -0)
+    done ) < /dev/null > /dev/null 2>&1 8>&- 9>&- &   # never holds the gate's output open (a dead, unreaped gate still passes kill -0)
   echo $! > "$OUT/$name.pid"
 }
 
@@ -93,6 +106,7 @@ ss_sentinel_finish() {
   # Bounded: a hung docker exec in the sampler must not hang the gate.
   for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || break; sleep 1; done
   [[ -n "$pid" ]] && { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; }
+  rm -f "$OUT/$name.pid"   # a later kill must never hit a reused pid
   before="$(cat "$OUT/$name.before")"; after="$(ss_db_identity "$container")"
   [[ "$after" == "|"* || "$after" == *"|" ]] && { sleep 2; after="$(ss_db_identity "$container")"; }
   peak="$(grep -E '^[0-9]+$' "$OUT/$name.conn" | sort -n | tail -1)"
@@ -116,7 +130,7 @@ ss_job_lock_wait() {
     [[ -n "$rows" ]] || return 0
     [[ $waited -ge $SS_JOB_LOCK_WAIT_SEC ]] && { echo "⚠  job-scheduler locks still fresh after ${waited}s:"; echo "$rows" | head -5; return 0; }
     [[ $waited == 0 ]] && { echo "waiting for fresh job-scheduler locks to expire:"; echo "$rows" | head -5; }
-    sleep 10; waited=$((waited + 10))
+    sleep 10 & wait $!; waited=$((waited + 10))   # background + wait: a signal is handled at once
   done
 }
 
@@ -149,19 +163,31 @@ gate_before_e2e() {
   # Watched from before the stop to after the restore: the swap itself is where a shared DB gets recreated.
   ss_sentinel_start "$SS_STACK_DB_CONTAINER" e2e
   SS_E2E_STARTED=1   # from the stop on, every exit path restores the base app
-  bash -c "$SS_E2E_STOP" > /dev/null 2>&1 || true
+  # Through timed (background + wait, GATE_TIMEOUT): a signal mid-stop or mid-build is handled at once, not minutes later.
+  timed bash -c "$SS_E2E_STOP" > /dev/null 2>&1 || true
   ss_job_lock_wait || { fail "e2e: job-scheduler lock check failed"; GATE_SKIP_E2E=1; ss_e2e_finish; return; }
-  bash -c "$SS_E2E_UP" > "$OUT/e2e-up.txt" 2>&1 \
+  timed bash -c "$SS_E2E_UP" > "$OUT/e2e-up.txt" 2>&1 \
     || { fail "e2e: compose up failed:"; tail -20 "$OUT/e2e-up.txt"; GATE_SKIP_E2E=1; ss_e2e_finish; return; }
   set_or_none "$SS_PROXY_RESTART" && { bash -c "$SS_PROXY_RESTART" > /dev/null 2>&1 || true; }
 }
 
 # ss_e2e_restore: put the base app back, health-waited, before the lock changes hands; nothing to do when nothing started.
 # Runs in the MAIN tree, so the base app comes back with the main tree's compose files, env and code.
+# SS_E2E_STARTED: 0 nothing to restore, 1 restore needed, 2 restore already ran (a signal's trap fires only after the
+# foreground restore returns, so cleanup then finishes the proxy restart and the report instead of restoring twice).
 ss_e2e_restore() {
-  [[ $SS_E2E_STARTED == 1 ]] || return 0
-  if (cd "$SS_MAIN_ROOT" && bash -c "$SS_E2E_RESTORE") > "$OUT/e2e-restore.txt" 2>&1; then
-    set_or_none "$SS_PROXY_RESTART" && { (cd "$SS_MAIN_ROOT" && bash -c "$SS_PROXY_RESTART") > /dev/null 2>&1 || true; }
+  if [[ $SS_E2E_STARTED == 1 ]]; then
+    SS_E2E_STARTED=2
+    # Shielded: a second Ctrl-C must not kill compose mid-restore (it re-enables SIGINT); bounded by SS_RESTORE_TIMEOUT_SEC.
+    # No subshell around it: a subshell would die on a group TERM/HUP and lose the result. The shielded shell (own session)
+    # changes into the main tree and writes the result file itself, so a trap right after it still sees it.
+    shielded "${SS_RESTORE_TIMEOUT_SEC:-600}" bash -c 'cd "$1" && bash -c "$2"; echo $? > "$3"' _ \
+      "$SS_MAIN_ROOT" "$SS_E2E_RESTORE" "$OUT/e2e-restore.rc" > "$OUT/e2e-restore.txt" 2>&1
+  fi
+  [[ $SS_E2E_STARTED == 2 ]] || return 0
+  if [[ "$(cat "$OUT/e2e-restore.rc" 2>/dev/null)" == 0 ]]; then
+    set_or_none "$SS_PROXY_RESTART" \
+      && { shielded 120 bash -c 'cd "$1" && bash -c "$2"' _ "$SS_MAIN_ROOT" "$SS_PROXY_RESTART" > /dev/null 2>&1 || true; }
     echo "base app restored at $(date -u +%H:%M:%SZ)"
   else fail "e2e: could not restore the base app — run in $SS_MAIN_ROOT: $SS_E2E_RESTORE"; tail -10 "$OUT/e2e-restore.txt"; fi
   SS_E2E_STARTED=0

@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.2
+
+Fixes from the second, third and fourth fresh reviews (of 1.2.1 and two 1.2.2 drafts). Regression tests cover the
+sentinel pattern, the login check, signals during build / restore / tests, run_timeout.py, the ensure-up lock wait and the
+slot release / mutex break; the `ln` password, the empty `SS_MAIN_ROOT` check, the sampler pid removal and the
+background polls were checked by hand only. Verified end to end on real Docker (postgres + backend containers): unit
+tests on the test DB, E2E swap and restore, Ctrl-C and TERM mid-E2E.
+
+### Fixed
+- DB sentinel matches the server's own message texts (any driver prefix: psql, JDBC, Npgsql, node-pg, pgx, lib/pq,
+  psycopg, SQLAlchemy, asyncpg; incl. a crash `WARNING` and "not yet accepting connections"), so "Connection refused" in
+  test output, `:53300:` or a number no longer fails a passing gate.
+- The test-DB login check gives the drop-the-volume advice only on a real password mismatch (`28P01`); other errors are shown.
+- Cleanup ignores further INT/TERM/HUP, and the restore + proxy restart run `shielded` (own session, hard timeout
+  `SS_RESTORE_TIMEOUT_SEC`), so a second Ctrl-C cannot kill compose mid-restore (Go re-enables SIGINT); a Ctrl-C during the
+  normal restore no longer runs it twice.
+- Cleanup stops and waits (bounded) for every RUNNING job before the slot is freed; finished jobs are never signalled.
+- The E2E stop and build and the test-DB up run through `timed` (background + wait, under `GATE_TIMEOUT`); a wrapped
+  ensure-up runs background + wait, with only the ensure-up itself under `GATE_TIMEOUT` (the lock wait keeps the lock's
+  timeout); lock/slot/job-lock polls sleep in the background. A signal is handled at once.
+- `run_timeout.py`: signals are blocked around the start, so an early TERM never orphans the command; a signal with no
+  timeout exits 143 at once (polling wait, EPERM on a zombie group handled); the command gets default INT/QUIT/TERM/HUP; new
+  `--shield` mode (a shielded timeout still stops the command gracefully). `timed` commands read /dev/null.
+- Sampler pid files are removed after the stop, so exit cleanup never signals a reused pid.
+- Run slots: a slot is released even when the gate is stopped between its mkdir and its owner write; a leaked takeover
+  mutex is broken by rename-then-recheck and never put back inside a re-created one.
+- Test-DB password created with an atomic `ln`; an empty `SS_MAIN_ROOT` fails the settings check.
+- Cleanup messages ("base app restored", "could not restore — run …") reach the user even when the exit trap fires
+  during a step whose output goes to a temp file (found in a real-Docker smoke run).
+- A group TERM/HUP during the normal restore no longer releases the lock mid-restore; a TERM during a slow ensure-up
+  frees the stack lock with the gate; the sentinel also catches "remaining connection slots are reserved" and no longer
+  flags the app's own idle-timeout disconnects.
+
 ## 1.2.1
 
 Fixes from a fresh review of the 1.2.0 tooling; each proved defect has a regression test with a fake `docker`.

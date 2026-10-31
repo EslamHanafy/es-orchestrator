@@ -666,9 +666,15 @@ echo "cwd=$PWD docker $*" >> "$DOCKER_LOG"
 case "$1" in
   inspect) case "$3" in *Health*) echo healthy;; *StartedAt*) echo "2026-10-31T10:00:00Z";; esac ;;
   exec) case "$*" in *postmaster*) echo "2026-10-31 10:00:00+00";; *count*) echo 7;; *max_connections*) echo 100;;
-        *"select 1"*) echo 1;; esac ;;
+        *"select 1"*) [[ -n "${FAKE_AUTH_ERR:-}" ]] && { echo "$FAKE_AUTH_ERR" >&2; exit 2; }; echo 1;; esac ;;
   stop) exit 0;;
-  compose) exit 0;;
+  compose) case "$*" in
+      *--force-recreate*)  # like docker compose (Go), the restore re-enables SIGINT
+        python3 -c "import signal,time; signal.signal(signal.SIGINT, signal.default_int_handler); time.sleep(float('${RESTORE_SLEEP:-0}'))" \
+          || exit 130
+        echo "restore-finished" >> "$DOCKER_LOG";;
+      *" up "*--build*) sleep "${UP_SLEEP:-0}";;
+    esac; exit 0;;
 esac
 """
 
@@ -690,16 +696,19 @@ class SharedStackGateTests(Base):
                     "ES_STACK_LOCK_DIR": str(self.lock), "ES_RUN_SLOT_DIR": str(self.slots),
                     "TMPDIR": str(self.repo.tmp), "ES_RUN_SLOT_TIMEOUT_SECONDS": "5"}
 
-    def gate(self, test_cmd=None, e2e_cmd="echo e2e-ok", **settings):
+    def gate(self, test_cmd=None, e2e_cmd="echo e2e-ok", answers=None, **settings):
         """Scaffold the snippet, override shared-stack.env settings (None deletes the line); returns the plan folder."""
         test_cmd = test_cmd or f"touch {self.marker}"
         out, plan = self.repo.scaffold(PROFILES=["backend"], EXTRA_GATES=["pre-shared-stack"], TEST_CMD=test_cmd,
                                        TEST_FAILURES_EXTRACT="cat > /dev/null", E2E_CMD=e2e_cmd, BUILD_CMD="none",
-                                       LINT_CMD="none", FORMAT_CHECK="none")
+                                       LINT_CMD="none", FORMAT_CHECK="none", **(answers or {}))
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         env_file = plan / "helpers" / "shared-stack.env"
         lines = env_file.read_text().splitlines()
         for key, value in settings.items():
+            if f"{key}=(" in lines:  # a multi-line array: drop it through its closing ")"
+                start = lines.index(f"{key}=(")
+                del lines[start:lines.index(")", start) + 1]
             lines = [ln for ln in lines if not ln.startswith(f"{key}=")]
             if value is not None:
                 lines.append(f"{key}={value}")
@@ -828,6 +837,174 @@ class SharedStackGateTests(Base):
         self.assertIn("--force-recreate", self.docker_log())
         self.assert_nothing_left()
 
+    def test_ordinary_test_output_does_not_trip_the_sentinel(self):
+        plan = self.gate(test_cmd="echo 'curl: (7) Failed to connect: Connection refused'; echo 'Duration: 1.533001 s'")
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertIn("0 killed", out.stdout)
+
+    def test_a_login_failure_that_is_not_the_password_does_not_advise_dropping_the_volume(self):
+        self.env["FAKE_AUTH_ERR"] = "psql: error: FATAL:  sorry, too many clients already"
+        plan = self.gate()
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("too many clients", out.stdout)
+        self.assertNotIn("down -v", out.stdout)
+        self.assertFalse(self.marker.exists())
+
+    def test_a_password_mismatch_advises_dropping_the_test_volume(self):
+        self.env["FAKE_AUTH_ERR"] = 'psql: error: FATAL:  password authentication failed for user "app_test"'
+        plan = self.gate()
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("down -v", out.stdout)
+
+    def test_a_second_ctrl_c_does_not_abort_the_restore(self):
+        import signal
+        import time
+        self.env["RESTORE_SLEEP"] = "3"
+        plan = self.gate(e2e_cmd="sleep 30")
+        proc = subprocess.Popen(["bash", str(plan / "check.sh"), "HEAD", "--no-tests", "--e2e", "smoke"],
+                                cwd=self.repo.path, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
+        self.assertTrue(self.wait_for(lambda: " up -d --build" in self.docker_log() and any(self.slots.glob("slot*"))))
+        time.sleep(1)
+        os.killpg(proc.pid, signal.SIGINT)
+        self.assertTrue(self.wait_for(lambda: "--force-recreate" in self.docker_log()), self.docker_log())
+        os.killpg(proc.pid, signal.SIGINT)
+        proc.communicate(timeout=60)
+        self.assertIn("restore-finished", self.docker_log())
+        self.assertIn("restart nginx", self.docker_log().split("restore-finished", 1)[1])
+        self.assert_nothing_left()
+
+    def test_sigterm_during_a_long_e2e_build_is_handled_at_once(self):
+        import time
+        self.env["UP_SLEEP"] = "20"
+        plan = self.gate()
+        proc = self.start(plan, "--no-tests", "--e2e", "smoke")
+        self.assertTrue(self.wait_for(lambda: " up -d --build" in self.docker_log()))
+        time.sleep(1)
+        t0 = time.time()
+        proc.terminate()
+        proc.communicate(timeout=60)
+        self.assertLess(time.time() - t0, 10)
+        self.assertIn("restore-finished", self.docker_log())
+        self.assert_nothing_left()
+
+    def test_timed_commands_get_default_sigint(self):
+        check = (f"{sys.executable} -c 'import signal,sys; "
+                 "sys.exit(0 if signal.getsignal(signal.SIGINT) is signal.default_int_handler else 9)'")
+        plan = self.gate(test_cmd=check)
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout)
+
+    def test_sentinel_pattern_matches_driver_errors_and_not_ordinary_output(self):
+        snippet = (SKILL / "profiles" / "backend" / "gate-snippets" / "pre-shared-stack.sh").read_text()
+        defs = "\n".join(ln for ln in snippet.splitlines() if ln.startswith("SS_DB_KILL_RE="))
+        pattern = run(["bash", "-c", defs + '\nprintf %s "$SS_DB_KILL_RE"']).stdout
+        hits = ["FATAL:  terminating connection due to administrator command",
+                "WARNING:  terminating connection because of crash of another server process",
+                "FATAL:  the database system is not yet accepting connections",
+                "Npgsql.PostgresException (0x80004005): 57P01: terminating connection due to administrator command",
+                "error: terminating connection due to administrator command", "  code: '57P01',",
+                "psycopg2.errors.TooManyConnections: sorry, too many clients already",
+                "pq: terminating connection due to administrator command", "pq: sorry, too many clients already",
+                "psycopg2.OperationalError: terminating connection due to administrator command",
+                "sqlalchemy.exc.OperationalError: (psycopg2.errors.AdminShutdown) terminating connection due to administrator command",
+                "asyncpg.exceptions.TooManyConnectionsError: sorry, too many clients already",
+                "org.postgresql.util.PSQLException: FATAL: the database system is starting up",
+                "Npgsql.PostgresException (0x80004005): 53300: remaining connection slots are reserved for roles",
+                "FATAL:  the database system is not accepting connections"]
+        misses = ["curl: (7) Failed to connect to localhost port 80: Connection refused", "Duration: 1.533001 s",
+                  "Failed to bind to address http://127.0.0.1:53300: address already in use.", "Processed item 53300: ok",
+                  "test terminating connection pool cleanly passed",
+                  "FATAL:  terminating connection due to idle-session timeout"]
+        for line in hits + misses:
+            got = run(["grep", "-cE", pattern], input=line + "\n").stdout.strip()
+            self.assertEqual(got, "1" if line in hits else "0", line)
+
+    def test_one_ctrl_c_during_the_normal_restore_restores_once(self):
+        import signal
+        self.env["RESTORE_SLEEP"] = "3"
+        plan = self.gate()
+        proc = subprocess.Popen(["bash", str(plan / "check.sh"), "HEAD", "--no-tests", "--e2e", "smoke"],
+                                cwd=self.repo.path, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
+        self.assertTrue(self.wait_for(lambda: "--force-recreate" in self.docker_log()), self.docker_log())
+        os.killpg(proc.pid, signal.SIGINT)
+        proc.communicate(timeout=60)
+        self.assertEqual(self.docker_log().count("restore-finished"), 1, self.docker_log())
+        self.assertIn("restart nginx", self.docker_log().split("restore-finished", 1)[1])
+        self.assert_nothing_left()
+
+    def test_a_group_term_during_the_normal_restore_keeps_the_lock_until_it_ends(self):
+        import signal
+        self.env["RESTORE_SLEEP"] = "3"
+        plan = self.gate()
+        proc = subprocess.Popen(["bash", str(plan / "check.sh"), "HEAD", "--no-tests", "--e2e", "smoke"],
+                                cwd=self.repo.path, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
+        self.assertTrue(self.wait_for(lambda: "--force-recreate" in self.docker_log()), self.docker_log())
+        os.killpg(proc.pid, signal.SIGTERM)
+        out = proc.communicate(timeout=60)[0]
+        self.assertIn("restore-finished", self.docker_log(), out)
+        self.assertEqual(self.docker_log().count("restore-finished"), 1)
+        self.assertNotIn("could not restore", out)
+        self.assert_nothing_left()
+
+    def test_an_interrupt_during_e2e_still_prints_the_restore_report(self):
+        import time
+        plan = self.gate(e2e_cmd="sleep 30")
+        proc = self.start(plan, "--no-tests", "--e2e", "smoke")
+        self.assertTrue(self.wait_for(lambda: " up -d --build" in self.docker_log()))
+        time.sleep(1)
+        proc.terminate()
+        out = proc.communicate(timeout=60)[0]
+        self.assertIn("base app restored", out)
+        self.assert_nothing_left()
+
+    def test_a_term_during_a_slow_ensure_up_frees_the_lock_with_the_gate(self):
+        import time
+        plan = self.gate(SS_SHARED_ENSURE="('false|sleep 25')")
+        proc = self.start(plan)
+        self.assertTrue(self.wait_for(self.lock.exists))
+        time.sleep(1)
+        proc.terminate()
+        proc.communicate(timeout=60)
+        time.sleep(1)
+        self.assertFalse(self.lock.exists(), "stack lock still held after the gate exited")
+
+    def test_an_ensure_up_may_wait_for_the_lock_longer_than_the_gate_timeout(self):
+        ran = self.repo.tmp / "ensure-ran"
+        plan = self.gate(answers={"GATE_TIMEOUT_SECONDS": 3}, SS_SHARED_ENSURE=f"('false|touch {ran}')")
+        holder = subprocess.Popen(["bash", "-c", f"source {plan}/helpers/stack_lock.sh; stack_lock_acquire holder; sleep 6"],
+                                  env=self.env)
+        self.addCleanup(lambda: (holder.kill(), holder.wait()))
+        self.assertTrue(self.wait_for(self.lock.exists))
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertTrue(ran.exists(), out.stdout)
+        self.assertNotIn("ensure-up failed", out.stdout)
+
+    def test_slot_helpers_release_an_ownerless_own_slot_and_break_a_leaked_mutex(self):
+        helpers = SKILL / "profiles" / "backend" / "helpers"
+        script = f"""
+            source {helpers}/run_slot.sh
+            root="$(_run_slot_root)"; mkdir -p "$root"
+            # stopped between mkdir and the owner write: still ours, released
+            mkdir "$root/slot.1"; RUN_SLOT_HELD="$root/slot.1"; run_slot_release
+            [ -e "$root/slot.1" ] && echo OWNERLESS-LEFT
+            # a dead holder's slot behind a leaked (old) takeover mutex: first pass breaks the mutex, next takes over
+            mkdir "$root/slot.1" "$root/.takeover"; printf 'pid=999999\nproc_start=x\n' > "$root/slot.1/owner"
+            touch -t 200001010000 "$root/.takeover"
+            _run_slot_break_stale "$root/slot.1"; _run_slot_break_stale "$root/slot.1" 2>/dev/null
+            [ -e "$root/.takeover" ] && echo MUTEX-LEFT
+            [ -e "$root/slot.1" ] && echo STALE-LEFT
+            ls -a "$root" | grep -q broken && echo BROKEN-COPY-LEFT
+            echo done
+        """
+        out = run(["/bin/bash", "-c", script], env=self.env)
+        self.assertEqual(out.stdout.strip(), "done", out.stdout + out.stderr)
+
     def test_scaffold_rejects_a_helper_path(self):
         snippets = SKILL / "profiles" / "backend" / "gate-snippets"
         bad = snippets / "zz-bad-helper.sh"
@@ -858,6 +1035,60 @@ class SignalTests(unittest.TestCase):
             time.sleep(0.3)
             with self.assertRaises(ProcessLookupError):
                 os.kill(child, 0)
+
+
+class RunTimeoutSignalTests(unittest.TestCase):
+    """run_timeout.py: no orphan on an early signal, a prompt 143 without a timeout, and --shield."""
+    RT = TEMPLATES / "run_timeout.py"
+
+    def test_an_early_signal_never_orphans_the_command(self):
+        import random
+        import signal
+        import time
+        marker = f"{random.randint(10**6, 10**7)}.5"
+        for _ in range(60):
+            proc = subprocess.Popen([sys.executable, str(self.RT), "600", "--", "/bin/sleep", marker])
+            time.sleep(random.uniform(0.01, 0.06))
+            proc.send_signal(signal.SIGTERM)
+            proc.wait(timeout=20)
+        time.sleep(0.5)
+        left = run(["pgrep", "-f", f"sleep {marker}"]).stdout.split()
+        for pid in left:
+            os.kill(int(pid), signal.SIGKILL)
+        self.assertEqual(left, [])
+
+    def test_a_signal_without_a_timeout_exits_143_at_once(self):
+        import signal
+        import time
+        proc = subprocess.Popen([sys.executable, str(self.RT), "0", "--", "sleep", "30"])
+        time.sleep(0.5)
+        t0 = time.time()
+        proc.send_signal(signal.SIGTERM)
+        self.assertEqual(proc.wait(timeout=20), 143)
+        self.assertLess(time.time() - t0, 3)
+
+    def test_a_shielded_timeout_stops_the_command_gracefully(self):
+        import time
+        t0 = time.time()
+        out = run([sys.executable, self.RT, "--shield", "1", "--", "bash", "-c", "sleep 20"], timeout=30)
+        self.assertEqual(out.returncode, 124)
+        self.assertLess(time.time() - t0, 4)
+
+    def test_shield_survives_ctrl_c_even_when_the_command_re_enables_sigint(self):
+        import signal
+        import time
+        child = ("import signal,time; signal.signal(signal.SIGINT, signal.default_int_handler); "
+                 "time.sleep(2); print('child-finished')")
+        proc = subprocess.Popen(["bash", "-c", f"trap '' INT TERM HUP; {sys.executable} {self.RT} --shield 30 -- "
+                                 f"{sys.executable} -c \"{child}\"; echo rc=$?"], start_new_session=True,
+                                stdout=subprocess.PIPE, text=True)
+        time.sleep(0.7)
+        os.killpg(proc.pid, signal.SIGINT)
+        time.sleep(0.2)
+        os.killpg(proc.pid, signal.SIGINT)
+        out = proc.communicate(timeout=30)[0]
+        self.assertIn("child-finished", out)
+        self.assertIn("rc=0", out)
 
 
 class StatusFormatTests(unittest.TestCase):
