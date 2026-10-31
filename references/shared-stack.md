@@ -13,6 +13,10 @@ self-tests, `shared-stack.env`, a test-DB compose file, `testdb_conn.sh`) copied
   starts it bakes its own env file and bind mounts into a container every tree uses.*
 - **Restore with `--wait`, and hand the lock over only after the restored service is healthy.** *Releasing while the app
   still migrates or registers jobs let the next holder recreate it mid-boot (stale scheduler locks, crash loops).*
+- **Restore from the MAIN tree, rebuilt (`--build`), with a pinned compose project (`-p`).** *The E2E `up --build` left the
+  worktree's image on the shared tag; a restore run from the worktree brought every tree back on that worktree's code and env.*
+- **Every exit path after the stop restores**, an interrupt or a failed check included (mark "started" before the stop).
+  *A gate killed while it waited for scheduler locks left the base app stopped and released the lock.*
 - **A proxy re-resolves after a swap** (nginx: `upstream { zone <name> 64k; server <svc>:<port> resolve; }` + one
   `resolver`), **or is restarted after it.** *A static upstream keeps the old container's IP: 502 until someone restarts it.*
 - **Never edit or `cp` over a bash script that may be running; write the new version beside it and `mv` it into place.**
@@ -42,8 +46,10 @@ self-tests, `shared-stack.env`, a test-DB compose file, `testdb_conn.sh`) copied
 
 ## 4. DB sentinel (one gate line per heavy phase)
 
-Record the container start time and the database server's start time before the phase, sample the connection count every
-second, then compare and grep the phase log for terminated / too-many-connections errors (`57P01`, `53300`). One line:
+Record the container start time and the database server's start time before the phase (for E2E: before the stop, compared
+after the restore, since the swap is where a shared DB gets recreated), sample the connection count every second, then compare
+and grep the phase logs for terminated / recovering / refused / too-many-connections errors (`57P01`, `57P02`, `57P03`,
+`53300`, "Connection refused"). One line:
 restart → FAIL naming the cause; killed connections → FAIL with the count and the peak; identity unreadable → **FAIL
 ("blind")**, never a pass. *Without it a restart mid-run shows up as red tests that look like code faults; a sentinel that
 passes when it read nothing verifies nothing.*
@@ -60,6 +66,8 @@ passes when it read nothing verifies nothing.*
 - **Ownerless grace** (a slot dir without an owner file is stale only after ~30 s). *That is an acquirer between `mkdir` and
   its owner write, not a crash.*
 - **Release on lock failure** (and in the EXIT trap chain). *A timed-out lock wait otherwise kept the slot until the pid died.*
+- **One stale-breaker at a time** (a takeover mutex dir). *With three waiters, one moved aside a slot another had just re-taken.*
+- **An unwritable slot or lock root fails at once.** *It looked like "busy" and the gate waited silently for two hours.*
 - Acceptance proofs before relying on a new cap: peak connections ≤ 70 % of `max_connections` during 2 parallel gates; a swap
   (restore) watched in both logs; three gates at once → the third waits; a SIGKILLed holder's slot is taken over.
 
@@ -67,13 +75,14 @@ passes when it read nothing verifies nothing.*
 
 Tickets (`<epoch>-<pid>` files in `<lock>.queue/`) served oldest first, each with the holder's process start time; dead or
 pid-reused tickets are pruned; `bash stack_lock.sh status` prints the holder and the queue. *Polling with a random winner
-starved lanes for hours, and nobody could see who was waiting.* The lock installs its EXIT trap while queued: re-chain
-your own cleanup after `stack_lock_acquire` returns (the snippet does).
+starved lanes for hours, and nobody could see who was waiting.* The lock installs its EXIT trap while queued: set
+`STACK_LOCK_EXIT_PREFIX` to your cleanup BEFORE acquiring, so that trap runs it first (the snippet sets `'set +u; cleanup'`).
+*Re-chaining only after the acquire lost the gate's cleanup for an interrupt while queued.*
 
 ## 7. Job-scheduler lock pre-check before an E2E boot
 
 Stop the running app **gracefully** (the scheduler releases its locks on shutdown), then wait — bounded and printed — only
-while a lock row is **younger than the scheduler's lock timeout**. Never delete lock rows by hand (that is a direct DB change).
+while a lock row is **younger than the scheduler's lock timeout**. A check that cannot read the table fails the E2E phase. Never delete lock rows by hand (that is a direct DB change).
 *A recreated app crashed on another instance's fresh lock rows; "wait for an empty table" waited for rows that never expire.*
 
 ## 8. Measure the payoff
@@ -86,7 +95,8 @@ removed.* Record "dropped, no measured gain" as a ruling so nobody rebuilds it.
 
 Gate scripts, helpers, compose files and proxies are code: change them **one step at a time, each with its proof log**
 (`runs/<task>/<step>.log`), then a **fresh strong-model review of the tooling diff and the proofs** before any gate relies on
-it. Repo files (compose, proxy config, Dockerfile, test support) go through lane batches with a FULL review; the orchestrator
+it. Gate scripts survive signals and missing settings: a TERM stops the running command before its slot is freed, cleanup
+runs with `set +u`, and required settings are checked before anything is stopped. Repo files (compose, proxy config, Dockerfile, test support) go through lane batches with a FULL review; the orchestrator
 edits only its own gitignored gate files. *The first tooling review found a sentinel that passed blind, a restore on the skip
 path and a trap chain broken by the new lock — all invisible in green gate runs.* Gate probes follow env-name renames: grep the
 gate for every renamed key. *A readiness probe still read a renamed key, and E2E silently never ran through the gate.*

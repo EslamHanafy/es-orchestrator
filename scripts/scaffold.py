@@ -161,6 +161,8 @@ def gate_snippets(answers: dict, profiles: list) -> dict:
         found[f"gates.d/{name}.sh"] = text
         for line in HELPERS_LINE.findall(text):
             for helper in line.split():
+                if "/" in helper or "\\" in helper or helper.startswith("."):
+                    sys.exit(f"EXTRA_GATES: snippet '{name}' names helper '{helper}': a plain file name is required")
                 source = hit.parent.parent / "helpers" / helper
                 if not source.is_file():
                     sys.exit(f"EXTRA_GATES: snippet '{name}' needs helpers/{helper}, which {hit.parent.parent.name} lacks")

@@ -661,6 +661,183 @@ class SharedStackTests(Base):
             self.assertRegex(out.stdout, r"\d+ passed, 0 failed")
 
 
+FAKE_DOCKER = r"""#!/bin/bash
+echo "cwd=$PWD docker $*" >> "$DOCKER_LOG"
+case "$1" in
+  inspect) case "$3" in *Health*) echo healthy;; *StartedAt*) echo "2026-10-31T10:00:00Z";; esac ;;
+  exec) case "$*" in *postmaster*) echo "2026-10-31 10:00:00+00";; *count*) echo 7;; *max_connections*) echo 100;;
+        *"select 1"*) echo 1;; esac ;;
+  stop) exit 0;;
+  compose) exit 0;;
+esac
+"""
+
+
+class SharedStackGateTests(Base):
+    """The pre-shared-stack snippet under a fake docker: every exit path restores, releases and reports (review of 1.2.0)."""
+
+    def setUp(self):
+        super().setUp()
+        bin_dir = self.repo.tmp / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "docker").write_text(FAKE_DOCKER)
+        (bin_dir / "docker").chmod(0o755)
+        self.log = self.repo.tmp / "docker.log"
+        self.slots = self.repo.tmp / "locks" / "slots"
+        self.lock = self.repo.tmp / "locks" / "stack.lock"
+        self.marker = self.repo.tmp / "tests-ran"
+        self.env = {**ENV, "PATH": f"{bin_dir}:{ENV['PATH']}", "DOCKER_LOG": str(self.log),
+                    "ES_STACK_LOCK_DIR": str(self.lock), "ES_RUN_SLOT_DIR": str(self.slots),
+                    "TMPDIR": str(self.repo.tmp), "ES_RUN_SLOT_TIMEOUT_SECONDS": "5"}
+
+    def gate(self, test_cmd=None, e2e_cmd="echo e2e-ok", **settings):
+        """Scaffold the snippet, override shared-stack.env settings (None deletes the line); returns the plan folder."""
+        test_cmd = test_cmd or f"touch {self.marker}"
+        out, plan = self.repo.scaffold(PROFILES=["backend"], EXTRA_GATES=["pre-shared-stack"], TEST_CMD=test_cmd,
+                                       TEST_FAILURES_EXTRACT="cat > /dev/null", E2E_CMD=e2e_cmd, BUILD_CMD="none",
+                                       LINT_CMD="none", FORMAT_CHECK="none")
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        env_file = plan / "helpers" / "shared-stack.env"
+        lines = env_file.read_text().splitlines()
+        for key, value in settings.items():
+            lines = [ln for ln in lines if not ln.startswith(f"{key}=")]
+            if value is not None:
+                lines.append(f"{key}={value}")
+        env_file.write_text("\n".join(lines) + "\n")
+        return plan
+
+    def start(self, plan, *args):
+        """Start check.sh in the background."""
+        return subprocess.Popen(["bash", str(plan / "check.sh"), "HEAD", *args], cwd=self.repo.path, env=self.env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def wait_for(self, predicate, seconds=20):
+        import time
+        for _ in range(seconds * 10):
+            if predicate():
+                return True
+            time.sleep(0.1)
+        return False
+
+    @staticmethod
+    def cwd_of(line):
+        """The real path of the cwd= field the fake docker logged."""
+        return os.path.realpath(line.split(" ", 1)[0][len("cwd="):])
+
+    def docker_log(self):
+        return self.log.read_text() if self.log.exists() else ""
+
+    def assert_nothing_left(self):
+        self.assertEqual([p.name for p in self.slots.glob("slot*")] if self.slots.exists() else [], [])
+        self.assertFalse(self.lock.exists(), "stack lock left behind")
+
+    def test_healthy_e2e_restores_from_the_main_tree_and_leaves_nothing(self):
+        plan = self.gate()
+        out = run(["bash", plan / "check.sh", "HEAD", "--e2e", "smoke"], cwd=self.repo.path, env=self.env, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertIn("db sentinel", out.stdout)
+        restore = [ln for ln in self.docker_log().splitlines() if "--force-recreate" in ln]
+        self.assertEqual(len(restore), 1, self.docker_log())
+        self.assertEqual(self.cwd_of(restore[0]), os.path.realpath(self.repo.path))
+        self.assert_nothing_left()
+
+    def test_a_worktree_gate_builds_its_own_tree_and_restores_from_the_main_tree(self):
+        plan = self.gate()
+        wt = self.repo.tmp / "wt"
+        self.assertEqual(git(self.repo.path, "worktree", "add", "-q", "--detach", wt).returncode, 0)
+        env = {**self.env, "CHECK_ROOT": str(wt)}
+        out = run(["bash", plan / "check.sh", "HEAD", "--no-tests", "--e2e", "smoke"], cwd=wt, env=env, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout)
+        lines = self.docker_log().splitlines()
+        up = [ln for ln in lines if " up -d --build" in ln and "--force-recreate" not in ln]
+        restore = [ln for ln in lines if "--force-recreate" in ln]
+        self.assertTrue(up and restore, self.docker_log())
+        self.assertEqual(self.cwd_of(up[0]), os.path.realpath(wt))
+        self.assertEqual(self.cwd_of(restore[0]), os.path.realpath(self.repo.path))
+
+    def test_interrupt_during_the_job_lock_wait_still_restores(self):
+        plan = self.gate(SS_JOB_LOCK_CMD="'echo fresh-row'")
+        proc = self.start(plan, "--no-tests", "--e2e", "smoke")
+        self.assertTrue(self.wait_for(lambda: "docker stop" in self.docker_log()), self.docker_log())
+        import time
+        time.sleep(0.5)
+        proc.terminate()
+        proc.communicate(timeout=60)
+        self.assertIn("--force-recreate", self.docker_log())
+        self.assert_nothing_left()
+
+    def test_a_missing_setting_fails_before_anything_is_stopped(self):
+        plan = self.gate(SS_PROXY_RESTART=None)
+        out = run(["bash", plan / "check.sh", "HEAD", "--e2e", "smoke"], cwd=self.repo.path, env=self.env, timeout=60)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("shared-stack.env is missing: SS_PROXY_RESTART", out.stdout)
+        self.assertIn("GATES FAILED", out.stdout)
+        self.assertNotIn("docker stop", self.docker_log())
+        self.assert_nothing_left()
+
+    def test_interrupt_while_queued_for_the_lock_releases_the_slot(self):
+        plan = self.gate()
+        holder = subprocess.Popen(["bash", "-c", f"source {plan}/helpers/stack_lock.sh; stack_lock_acquire holder; sleep 60"],
+                                  env=self.env)
+        self.addCleanup(lambda: (holder.kill(), holder.wait()))
+        self.assertTrue(self.wait_for(self.lock.exists))
+        proc = self.start(plan, "--no-tests", "--e2e", "smoke")
+        queue = Path(str(self.lock) + ".queue")
+        self.assertTrue(self.wait_for(lambda: queue.exists() and any(queue.iterdir())))
+        proc.terminate()
+        proc.communicate(timeout=60)
+        self.assertEqual([p.name for p in self.slots.glob("slot*")], [])
+        self.assertFalse(queue.exists() and any(queue.iterdir()), "ticket left in the queue")
+
+    def test_sigterm_during_unit_tests_stops_them_before_freeing_the_slot(self):
+        plan = self.gate(test_cmd=f"sleep 4; touch {self.marker}")
+        proc = self.start(plan)
+        self.assertTrue(self.wait_for(lambda: any(self.slots.glob("slot*"))))
+        proc.terminate()
+        proc.communicate(timeout=60)
+        import time
+        time.sleep(5)
+        self.assertFalse(self.marker.exists(), "the test command kept running after the gate was terminated")
+        self.assert_nothing_left()
+
+    def test_an_unwritable_slot_root_fails_at_once(self):
+        ro = self.repo.tmp / "ro"
+        ro.mkdir()
+        ro.chmod(0o555)
+        self.addCleanup(ro.chmod, 0o755)
+        self.env["ES_RUN_SLOT_DIR"] = str(ro / "slots")
+        self.env["ES_RUN_SLOT_TIMEOUT_SECONDS"] = "600"
+        plan = self.gate()
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.repo.path, env=self.env, timeout=60)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("cannot write", out.stdout + out.stderr)
+
+    def test_sentinel_fails_on_crash_recovery_errors(self):
+        plan = self.gate(e2e_cmd="echo 'FATAL: 57P02 terminating connection because of crash of another server process'")
+        out = run(["bash", plan / "check.sh", "HEAD", "--no-tests", "--e2e", "smoke"], cwd=self.repo.path, env=self.env,
+                  timeout=120)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("terminated / refused", out.stdout)
+
+    def test_a_failing_job_lock_check_fails_e2e_and_restores(self):
+        plan = self.gate(SS_JOB_LOCK_CMD="'exit 3'")
+        out = run(["bash", plan / "check.sh", "HEAD", "--no-tests", "--e2e", "smoke"], cwd=self.repo.path, env=self.env,
+                  timeout=120)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("job-lock check failed", out.stdout)
+        self.assertIn("--force-recreate", self.docker_log())
+        self.assert_nothing_left()
+
+    def test_scaffold_rejects_a_helper_path(self):
+        snippets = SKILL / "profiles" / "backend" / "gate-snippets"
+        bad = snippets / "zz-bad-helper.sh"
+        bad.write_text("# requires-helpers: ../../../SKILL.md\n")
+        self.addCleanup(bad.unlink)
+        out, _ = self.repo.scaffold(PROFILES=["backend"], EXTRA_GATES=["zz-bad-helper"])
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("plain file name", out.stdout + out.stderr)
+
+
 class SignalTests(unittest.TestCase):
     """run_timeout.py must not leave grandchildren running when it is terminated."""
 

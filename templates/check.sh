@@ -44,12 +44,20 @@ cd "$ROOT" || exit 2
 G=(git -c core.quotepath=off -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.autocrlf=false)
 # Temp dir: the system one, or a folder in the plan dir when the sandbox forbids it. Removed on exit (ES_KEEP_TMP=1 keeps it).
 OUT="$(mktemp -d 2>/dev/null)" || OUT="$(mktemp -d "$HERE/.gate-tmp.XXXXXX")" || { echo "cannot create a temp dir"; exit 2; }
+TIMED_PID=""
 cleanup() {
+  # A test or e2e command still running (the gate was signalled) is stopped first, so its slot is never freed under it.
+  [[ -n "$TIMED_PID" ]] && { kill -TERM "$TIMED_PID" 2>/dev/null; wait "$TIMED_PID" 2>/dev/null; }
   gate_hook on_exit
   [[ -n "${LOCK_DIR:-}" && "$(cat "$LOCK_DIR/pid" 2>/dev/null)" == "$$" ]] && rm -rf "$LOCK_DIR"
   [[ -z "${ES_KEEP_TMP:-}" ]] && rm -rf "$OUT"
 }
-trap cleanup EXIT
+# set +u: a cleanup step that meets an unset variable must not abort the rest of the cleanup (lock and slot release).
+trap 'set +u; cleanup' EXIT
+# A signal ends the gate through the EXIT trap at once (bash runs a trap only between commands, so timed() waits in the
+# background); run_timeout.py forwards the TERM to the command's whole group.
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 FAILED=0
 fail() { echo "❌ $1"; FAILED=1; }
 pass() { echo "✅ $1"; }
@@ -60,7 +68,14 @@ set_or_none() { [[ -n "$1" && "$1" != "none" ]]; }
 gate_hook() { declare -F "gate_$1" > /dev/null && "gate_$1"; return 0; }
 GATE_SKIP_TESTS=0; GATE_SKIP_E2E=0
 # timed <command…>: run with the wall-clock limit (exit 124 on timeout). Kills the whole process group.
-timed() { python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@"; }
+# Runs in the background + wait, so a signal to the gate is handled at once and cleanup() can stop the command.
+timed() {
+  python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@" &
+  TIMED_PID=$!
+  wait "$TIMED_PID"; local code=$?
+  TIMED_PID=""
+  return $code
+}
 # build_diff <list file> <out file>: added lines (git diff -U0 vs BASE, untracked text files whole) of the listed files.
 build_diff() {
   : > "$2"
@@ -91,7 +106,7 @@ echo "Changed files: $(wc -l < "$OUT/all" | tr -d ' ') (source: $(wc -l < "$OUT/
 # A snippet may use $BASE $ROOT $HERE $OUT ($OUT/all, $OUT/src) $E2E $GATE_TIMEOUT and pass/fail/skip/set_or_none/timed, and
 # may define the gate_<hook> functions above (e.g. pre-shared-stack: test DB, run slot, stack lock only around the phases that
 # need them). Do not set your own EXIT trap: cleanup() runs gate_on_exit, then removes $OUT and the stack lock ($LOCK_DIR).
-# A snippet that must chain a library's trap re-installs `trap 'cleanup; <library release>' EXIT` itself.
+# A snippet that must chain a library's trap re-installs `trap 'set +u; cleanup; <library release>' EXIT` itself.
 for g in "$HERE"/gates.d/pre-*.sh; do [[ -f "$g" ]] && run_snippet "$g"; done
 
 # 1. secrets never tracked. HOOK: adjust to this repo's real-config names.

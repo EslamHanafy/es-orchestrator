@@ -185,22 +185,28 @@ _run_slot_is_stale() {
 # Returns: 0 (a live slot is simply left alone; the caller's mkdir decides).
 # -----------------------------------------------------------------------------
 _run_slot_break_stale() {
-  local slot="$1" graveyard
+  local slot="$1" graveyard mutex age
   if [ ! -d "$slot" ] || ! _run_slot_is_stale "$slot"; then
     return 0
   fi
+  # One breaker at a time: with three waiters, one could otherwise move aside a slot another had just re-taken. A mutex
+  # left by a crashed breaker expires after the ownerless grace. Busy mutex = skip this round; the next poll retries.
+  mutex="$(_run_slot_root)/.takeover"
+  if ! mkdir "$mutex" 2>/dev/null; then
+    age=$(_run_slot_age_sec "$mutex") && [ "$age" -gt "$RUN_SLOT_INIT_GRACE_SEC" ] && rm -rf "$mutex"
+    return 0
+  fi
   graveyard="$slot.broken.$$"
-  mv "$slot" "$graveyard" 2>/dev/null || return 0
-  if _run_slot_is_stale "$graveyard"; then
-    rm -rf "$graveyard"
-    echo "NOTICE: broke a stale run slot left by a dead process ($(basename "$slot"))." >&2
-    return 0
+  if _run_slot_is_stale "$slot" && mv "$slot" "$graveyard" 2>/dev/null; then
+    if _run_slot_is_stale "$graveyard"; then
+      rm -rf "$graveyard"
+      echo "NOTICE: broke a stale run slot left by a dead process ($(basename "$slot"))." >&2
+    # A live holder took the slot between our check and the rename: put it back (never over a newer slot).
+    elif [ -e "$slot" ] || ! mv "$graveyard" "$slot" 2>/dev/null; then
+      echo "WARN: a live run slot was moved aside; inspect $graveyard." >&2
+    fi
   fi
-  # A live holder took the slot between our check and the rename: put it back (never over a newer slot).
-  if [ ! -e "$slot" ] && mv "$graveyard" "$slot" 2>/dev/null; then
-    return 0
-  fi
-  echo "WARN: a live run slot was moved aside; inspect $graveyard." >&2
+  rmdir "$mutex" 2>/dev/null
   return 0
 }
 
@@ -370,7 +376,11 @@ run_slot_acquire() {
     echo "run slot refused for '$label': the stack lock is already held by this process or its parent (take the slot before the lock)." >&2
     exit "$RUN_SLOT_REFUSED_EXIT"
   fi
-  mkdir -p "$(_run_slot_root)"
+  # An unwritable slot root would look like "all busy" for the whole timeout: say so and fail at once.
+  if ! mkdir -p "$(_run_slot_root)" 2>/dev/null || [ ! -w "$(_run_slot_root)" ]; then
+    echo "run slot: cannot write $(_run_slot_root) (set ES_RUN_SLOT_DIR to a writable path)." >&2
+    return 1
+  fi
   _run_slot_wait_and_take "$label"
 }
 

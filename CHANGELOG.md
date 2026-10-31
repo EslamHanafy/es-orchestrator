@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.1
+
+Fixes from a fresh review of the 1.2.0 tooling; each proved defect has a regression test with a fake `docker`.
+
+### Fixed
+- `pre-shared-stack`: an interrupt or failure after the app stop always restores (the "started" mark now comes before the stop).
+- `pre-shared-stack`: the base app is restored from the MAIN tree, rebuilt, with a pinned compose project; `SS_MAIN_ROOT` is exported.
+- Gate cleanup is kept while queued for the stack lock (`STACK_LOCK_EXIT_PREFIX`), so an interrupt there frees the slot.
+- Missing `shared-stack.env` settings fail up front, and cleanup runs with `set +u`, so the lock and slot are always released.
+- `check.sh`: SIGTERM/INT/HUP stop the running test or e2e command before its slot is freed (`timed` waits in the background).
+- DB sentinel: also fails on `57P02`/`57P03`/refused connections, covers the whole E2E swap, has a bounded sampler stop, and its
+  sampler no longer keeps the gate's output open after the gate dies.
+- Run slots and stack lock: an unwritable root fails at once; stale slot takeovers are serialised by a mutex.
+- Slot released on a lock timeout; a failing job-lock check fails E2E; the test-DB password is created race-free and checked
+  against the volume; `scaffold.py` rejects helper names that are not plain file names.
+
 ## 1.2.0
 
 From a 4-lane wave on one shared Docker stack (a .NET backend, 2026-10-31). Every rule carries its reason.

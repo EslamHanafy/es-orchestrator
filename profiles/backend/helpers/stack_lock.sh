@@ -19,6 +19,7 @@
 # Contract for scripts:
 #   - Acquire BEFORE you install your own EXIT trap: acquiring installs EXIT/INT/TERM traps that release the lock.
 #   - A script whose own EXIT trap replaces the lock's EXIT trap calls stack_lock_release as the LAST step of that trap.
+#   - Or set STACK_LOCK_EXIT_PREFIX to that cleanup before acquiring: the lock's own EXIT trap runs it first, queued or held.
 #   - A child started by the holder (check.sh -> the e2e runner) sees ES_STACK_LOCK_OWNER_PID and becomes a no-op, so
 #     nested runs never deadlock.
 #   - Bash 3.2 compatible (macOS /bin/bash): no BASHPID, no associative arrays. Holder identity is $$, so a holder is
@@ -407,7 +408,9 @@ _stack_lock_is_nested() {
 # Args: None
 # -----------------------------------------------------------------------------
 _stack_lock_install_traps() {
-  trap '_stack_lock_on_exit' EXIT
+  # STACK_LOCK_EXIT_PREFIX (optional): the caller's own cleanup, run first by the same EXIT trap, so it is kept while the
+  # process waits in the queue too (e.g. 'set +u; cleanup'); the lock is released after it.
+  trap "${STACK_LOCK_EXIT_PREFIX:+$STACK_LOCK_EXIT_PREFIX; }_stack_lock_on_exit" EXIT
   trap "exit $STACK_LOCK_SIGNAL_EXIT" INT TERM
 }
 
@@ -499,6 +502,13 @@ stack_lock_acquire() {
   if _stack_lock_is_nested; then
     STACK_LOCK_STATE="nested"
     return 0
+  fi
+  # An unwritable lock root would look like "busy" for the whole timeout: say so and fail at once.
+  local queue_dir
+  queue_dir="$(_stack_lock_queue_dir)"
+  if ! mkdir -p "$queue_dir" 2>/dev/null || [ ! -w "$queue_dir" ]; then
+    echo "stack lock: cannot write $queue_dir (set ES_STACK_LOCK_DIR to a writable path)." >&2
+    return 1
   fi
   _stack_lock_wait_and_take "$label"
 }
