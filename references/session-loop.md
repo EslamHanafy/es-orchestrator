@@ -50,6 +50,8 @@ Each implementer REPORT ends with DECISIONS NEEDED. For each one:
 
 ## 5. Dispatch the pair
 
+- **A wave of lanes?** A large set of independent batches can run as up to 4 parallel lanes on worktree tracks
+  (`parallel-lanes.md`); each lane then runs this loop on its own track.
 - **Parallel or sequential?** If the survey tags the pair `PARALLEL-OK`, `PARALLEL_PAIRS` is not `off` and the previous pair is
   committed, run A and B at the same time in git worktrees (`parallel-pairs.md`) and continue at §6 once they are landed and the
   integration gate has run. Otherwise use the sequential steps below.
@@ -102,3 +104,7 @@ with `git status`.
 - Before big strong-model jobs (phase close-out verifications, multi-batch sweeps), tell the owner first.
 - Phase close-out: a fresh FULL review over the whole phase diff. Then tick the roadmap row and write a
   next-session prompt.
+- Plan finished: clean up, then the **final whole-task review** (`pairing-and-review.md`), its fixes, the final gate, and only
+  then the END STATE.
+- **Tooling changes** (gate, helpers, compose, proxy) follow code discipline: one step at a time with its proof log, then a
+  fresh strong-model review of the tooling diff before any gate relies on it (`shared-stack.md` §9).

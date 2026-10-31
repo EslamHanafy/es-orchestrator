@@ -45,6 +45,7 @@ G=(git -c core.quotepath=off -c diff.noprefix=false -c diff.mnemonicPrefix=false
 # Temp dir: the system one, or a folder in the plan dir when the sandbox forbids it. Removed on exit (ES_KEEP_TMP=1 keeps it).
 OUT="$(mktemp -d 2>/dev/null)" || OUT="$(mktemp -d "$HERE/.gate-tmp.XXXXXX")" || { echo "cannot create a temp dir"; exit 2; }
 cleanup() {
+  gate_hook on_exit
   [[ -n "${LOCK_DIR:-}" && "$(cat "$LOCK_DIR/pid" 2>/dev/null)" == "$$" ]] && rm -rf "$LOCK_DIR"
   [[ -z "${ES_KEEP_TMP:-}" ]] && rm -rf "$OUT"
 }
@@ -54,6 +55,10 @@ fail() { echo "❌ $1"; FAILED=1; }
 pass() { echo "✅ $1"; }
 skip() { echo "⏭  $1"; }
 set_or_none() { [[ -n "$1" && "$1" != "none" ]]; }
+# gate_hook <name>: run gate_<name> when a gates.d snippet defined it. Hooks: before_tests, after_tests, before_e2e, after_e2e,
+# on_exit. A before_* hook may set GATE_SKIP_TESTS=1 / GATE_SKIP_E2E=1 (after calling fail) to stop that phase from running.
+gate_hook() { declare -F "gate_$1" > /dev/null && "gate_$1"; return 0; }
+GATE_SKIP_TESTS=0; GATE_SKIP_E2E=0
 # timed <command…>: run with the wall-clock limit (exit 124 on timeout). Kills the whole process group.
 timed() { python3 "$HERE/run_timeout.py" "$GATE_TIMEOUT" -- "$@"; }
 # build_diff <list file> <out file>: added lines (git diff -U0 vs BASE, untracked text files whole) of the listed files.
@@ -83,8 +88,10 @@ grep -E "$SRC_PATTERN" "$OUT/all" > "$OUT/src" || true
 echo "Changed files: $(wc -l < "$OUT/all" | tr -d ' ') (source: $(wc -l < "$OUT/src" | tr -d ' '))"
 
 # Extra gates (gates.d/*.sh, sourced): pre-*.sh run here (e.g. a shared container lock), the rest before e2e.
-# A snippet may use $BASE $ROOT $HERE $OUT ($OUT/all, $OUT/src) $E2E $GATE_TIMEOUT and pass/fail/skip/set_or_none/timed.
-# Do not set your own EXIT trap: check.sh's cleanup() removes $OUT and the stack lock ($LOCK_DIR).
+# A snippet may use $BASE $ROOT $HERE $OUT ($OUT/all, $OUT/src) $E2E $GATE_TIMEOUT and pass/fail/skip/set_or_none/timed, and
+# may define the gate_<hook> functions above (e.g. pre-shared-stack: test DB, run slot, stack lock only around the phases that
+# need them). Do not set your own EXIT trap: cleanup() runs gate_on_exit, then removes $OUT and the stack lock ($LOCK_DIR).
+# A snippet that must chain a library's trap re-installs `trap 'cleanup; <library release>' EXIT` itself.
 for g in "$HERE"/gates.d/pre-*.sh; do [[ -f "$g" ]] && run_snippet "$g"; done
 
 # 1. secrets never tracked. HOOK: adjust to this repo's real-config names.
@@ -116,8 +123,13 @@ if [[ -s "$OUT/src" ]] && set_or_none "$FORMAT_CHECK"; then
 fi
 
 # 6. tests vs known failures.
-if [[ $RUN_TESTS == 1 ]] && set_or_none "$TEST_CMD"; then
+if [[ $RUN_TESTS == 1 ]] && set_or_none "$TEST_CMD"; then gate_hook before_tests; fi
+if [[ $RUN_TESTS == 1 ]] && set_or_none "$TEST_CMD" && [[ $GATE_SKIP_TESTS == 0 ]]; then
+  TEST_PHASE_START=$SECONDS
   timed bash -c "$TEST_CMD" > "$OUT/tests.txt" 2>&1; TEST_EXIT=$?
+  gate_hook after_tests
+  # Measure before you speed up: tooling extras are kept only when this number shows a payoff (references/shared-stack.md).
+  echo "test phase: $((SECONDS - TEST_PHASE_START)) s"
   bash -c "$TEST_FAILURES_EXTRACT" < "$OUT/tests.txt" | sort -u > "$OUT/failed" || true
   grep -vE '^\s*(#|$)' "$HERE/known-test-failures.txt" 2>/dev/null | sort -u > "$OUT/known" || true
   NEW="$(comm -23 "$OUT/failed" "$OUT/known")"
@@ -161,8 +173,12 @@ fi
 for g in "$HERE"/gates.d/*.sh; do [[ -f "$g" && "$(basename "$g")" != pre-* ]] && run_snippet "$g"; done
 
 # 10. optional e2e / live checks.
-if [[ -n "$E2E" ]] && set_or_none "$E2E_CMD"; then
+if [[ -n "$E2E" ]] && set_or_none "$E2E_CMD"; then gate_hook before_e2e; fi
+if [[ -n "$E2E" ]] && set_or_none "$E2E_CMD" && [[ $GATE_SKIP_E2E == 0 ]]; then
+  E2E_PHASE_START=$SECONDS
   E2E="$E2E" timed bash -c "$E2E_CMD" > "$OUT/e2e.txt" 2>&1; E2E_EXIT=$?
+  gate_hook after_e2e
+  echo "e2e phase: $((SECONDS - E2E_PHASE_START)) s"
   if [[ $E2E_EXIT == 0 ]]; then pass "e2e: $E2E"; tail -15 "$OUT/e2e.txt"
   elif [[ $E2E_EXIT == 124 ]]; then fail "e2e TIMED OUT after ${GATE_TIMEOUT}s:"; tail -10 "$OUT/e2e.txt"
   else fail "e2e:"; tail -40 "$OUT/e2e.txt"; fi

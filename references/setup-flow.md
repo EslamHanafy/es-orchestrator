@@ -48,9 +48,12 @@ Round 2: gates
 - Function-length limit (default 60 for backend, 40 for mobile and web) and any other structural rule the gate
   should scan.
 - Extra gate snippets (`EXTRA_GATES`, from `profiles/<p>/gate-snippets/`): offer the ones that fit the detected
-  stack (e.g. layering + doc comments for a layered backend with required doc comments; a stack lock when several
-  worktrees share one container stack; core-imports-features + preview isolation for a mobile app with design
-  previews).
+  stack (e.g. layering + doc comments for a layered backend with required doc comments; `pre-shared-stack` when several
+  worktrees share one container stack and the tests can get their own database, else `pre-stack-lock`; see
+  `shared-stack.md`; core-imports-features + preview isolation for a mobile app with design previews).
+- **E2E frequency** (when there are E2E suites): **Touched suites per pair (Recommended)** — the reviewer runs the suites a
+  pair touches, live; the full suite runs at every merge and at the final gate — / **Full suite every pair**. Record it as an
+  O-row (`parallel-lanes.md` §2).
 - Localization: languages and locale files. If there is more than one language, "every user-visible key in every
   locale file in the same batch" becomes a rule.
 

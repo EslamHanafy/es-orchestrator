@@ -65,6 +65,24 @@ the orchestrator's `integration-gate.log`, which the reviewer verifies. The revi
   reviewer (SendMessage, cycle 2+) re-runs only what the fix touched.
 - Every issue in a touched file gets fixed before the commit, including old code in that file.
 
+## Money rules need a red test through the production path
+
+For money, quota, billing, reservations and idempotency rules, a review that only reads code is not enough: demand a test
+that fails (red) on the defect and runs through the **production** path (the real batch/async path, real config switches),
+not a dev shortcut. *A read-only review missed a batch-predicate defect that a real-path red test caught at once.*
+
+## Final whole-task review (after all waves and the clean-up)
+
+When the whole plan is done and cleaned up, one **fresh strong-model reviewer** does a QUICK cross-cutting review of the
+whole range (not line by line; parallel focused read-throughs are fine): money / quota / idempotency, secrets and key
+handling, cross-section configuration rules, external adapters, background/batch paths, performance, and over-engineering.
+Seams that no single batch owned are where it finds defects. Then the orchestrator:
+1. **verifies every finding in the code** (file:line quote) before accepting it;
+2. fixes the real ones as normal lane batches with a review, each with a **red test through the production path**;
+3. **rejects over-engineering**: a finding that adds complexity without a proven defect is declined with the reason;
+4. runs the final gate, then writes the END STATE.
+Record the reviewer's verdict, each finding's fate (fixed / rejected + why) and the final gate in the ledger.
+
 ## Report wording
 
 Plain words only. One line per checkpoint by its name ("Run really finished", "Every changed line read",

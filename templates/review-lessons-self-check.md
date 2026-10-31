@@ -50,6 +50,12 @@ appends every new defect class a review finds, so this list grows; that growth i
 24. Search the test tree for an existing helper before adding a private one.
 25. Components are wired explicitly in the composition root, never "if the container happens to find them".
 26. Prove every suite you changed actually ran: paste its own check count. A suite that silently skipped is not green.
+27. A renamed setting / env name / flag is renamed in the gate, probes and scripts too (grep them): a probe reading the old
+    name made a whole E2E stage silently never run.
+28. A timing-dependent test (cooldowns, windows, timeouts) puts NO slow step (DB reads, container exec, sleeps) between the
+    calls that must fall inside the window; do slow reads after the asserts.
+29. Tooling (gate, helpers, compose, proxy, Dockerfile) is code: one step at a time with its proof log, and never edit or `cp`
+    over a script that may be running (write beside it, then `mv`).
 
 {{PROFILE_SELF_CHECK}}
 

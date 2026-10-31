@@ -618,6 +618,49 @@ class GateRegressionTests(Base):
             self.assertEqual(out.returncode, 0, f"{snippet.name}: {out.stderr}")
 
 
+class SharedStackTests(Base):
+    """Gate hooks, the pre-shared-stack helpers and their self-tests (references/shared-stack.md)."""
+
+    def test_scaffold_copies_the_helpers_a_snippet_needs(self):
+        out, plan = self.repo.scaffold(PROFILES=["backend"], EXTRA_GATES=["pre-shared-stack"])
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        for name in ("run_slot.sh", "stack_lock.sh", "shared-stack.env", "docker-compose.testdb.yml", "testdb_conn.sh"):
+            self.assertTrue((plan / "helpers" / name).is_file(), name)
+        self.assertTrue(os.access(plan / "helpers" / "run_slot.sh", os.X_OK))
+        self.assertIn("ES_RUN_SLOTS", (plan / "helpers" / "shared-stack.env").read_text())
+
+    def test_hooks_wrap_the_test_phase_and_print_its_time(self):
+        marker = self.repo.tmp / "tests-ran"
+        _, plan = self.repo.scaffold(TEST_CMD=f"touch {marker}", TEST_FAILURES_EXTRACT="cat > /dev/null")
+        (plan / "gates.d" / "pre-hooks.sh").write_text(
+            "gate_before_tests() { echo HOOK-BEFORE; }\ngate_after_tests() { echo HOOK-AFTER; }\n"
+            "gate_on_exit() { echo HOOK-EXIT; }\n")
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.root)
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertTrue(marker.exists())
+        self.assertLess(out.stdout.index("HOOK-BEFORE"), out.stdout.index("HOOK-AFTER"))
+        self.assertRegex(out.stdout, r"test phase: \d+ s")
+        self.assertIn("HOOK-EXIT", out.stdout)
+
+    def test_before_hook_can_stop_the_test_phase(self):
+        marker = self.repo.tmp / "tests-ran"
+        _, plan = self.repo.scaffold(TEST_CMD=f"touch {marker}", TEST_FAILURES_EXTRACT="cat > /dev/null")
+        (plan / "gates.d" / "pre-hooks.sh").write_text(
+            'gate_before_tests() { fail "test DB down"; GATE_SKIP_TESTS=1; }\n')
+        out = run(["bash", plan / "check.sh", "HEAD"], cwd=self.root)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertFalse(marker.exists())
+        self.assertIn("test DB down", out.stdout)
+
+    def test_helper_self_tests_pass_under_the_system_bash(self):
+        bash = "/bin/bash" if os.path.exists("/bin/bash") else "bash"
+        env = {**ENV, "TMPDIR": str(self.repo.tmp)}
+        for name in ("run_slot_selftest.sh", "stack_lock_selftest.sh"):
+            out = run([bash, SKILL / "profiles" / "backend" / "helpers" / name], env=env, timeout=300)
+            self.assertEqual(out.returncode, 0, f"{name}:\n{out.stdout[-2000:]}\n{out.stderr[-1000:]}")
+            self.assertRegex(out.stdout, r"\d+ passed, 0 failed")
+
+
 class SignalTests(unittest.TestCase):
     """run_timeout.py must not leave grandchildren running when it is terminated."""
 

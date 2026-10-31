@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.0
+
+From a 4-lane wave on one shared Docker stack (a .NET backend, 2026-10-31). Every rule carries its reason.
+
+### Added
+- `references/shared-stack.md`: shared-stack safety (named services + `--no-deps`, fail fast on an unhealthy shared DB, health-waited
+  restore before the lock changes hands, proxy re-resolve, swap running scripts with `mv`), lock narrowing, a test-only database,
+  the DB sentinel, run slots, the FIFO stack lock, the job-scheduler lock pre-check, the "test phase: N s" timer and the
+  measured-payoff rule, and tooling-as-code discipline.
+- `references/parallel-lanes.md`: a wave of up to 4 lanes on worktree tracks (fact map, ≈30-min batches in disjoint-file groups +
+  a sequential tail, scope growth is an owner question, per-lane ownership, commit the plan amendment before any brief, run
+  folders before dispatch) and the E2E-frequency setup question.
+- Final whole-task review after all waves and the clean-up (`pairing-and-review.md`), and red tests through the production path
+  for money rules.
+- Backend `pre-shared-stack` gate snippet + `profiles/backend/helpers/` (`stack_lock.sh` FIFO lock with `status`, `run_slot.sh`,
+  both self-tests, `shared-stack.env`, `docker-compose.testdb.yml`, `testdb_conn.sh`); `scaffold.py` copies the files a snippet
+  names on its `# requires-helpers:` line into the plan's `helpers/`.
+- `check.sh` hooks `gate_before_tests` / `gate_after_tests` / `gate_before_e2e` / `gate_after_e2e` / `gate_on_exit`
+  (`GATE_SKIP_TESTS` / `GATE_SKIP_E2E` stop a phase), and `test phase: N s` / `e2e phase: N s` lines.
+- Self-check lessons: renamed settings in gate probes, timing windows without slow steps, tooling discipline (generic);
+  cross-section settings validation, production-path money tests, complete test seeds (backend).
+
+### Changed
+- `pre-stack-lock` no longer locks build/format/lint: it takes the lock just before the tests or E2E.
+
 ## 1.1.0
 
 ### Added

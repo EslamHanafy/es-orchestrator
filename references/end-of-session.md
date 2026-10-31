@@ -1,6 +1,7 @@
 # End-of-session ritual
 
 Trigger: the owner says stop, a usage limit is near, or the context is long and a fresh session would be cheaper.
+When the whole plan is finished, the clean-up and the final whole-task review (`pairing-and-review.md`) come first.
 If a task is running, either let it finish (when the owner said "stop after the running task") or record it as
 RUNNING with its pid, out-dir and session id.
 

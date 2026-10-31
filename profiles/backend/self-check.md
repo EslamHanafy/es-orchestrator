@@ -16,3 +16,10 @@ B10. Every new setting is in the settings class (validated at startup) AND in ev
 B11. A race or lock assertion that inspects database activity runs on its OWN connection, never inside the transaction that
      holds the lock.
 B12. Every changed e2e suite actually ran: paste its own check count.
+B13. A settings validator that checks one section against ANOTHER builds that other section fresh (an options factory),
+     never from a monitor's cached value; a settings write is checked for every section it NEWLY breaks, not only the
+     sections it owns.
+B14. Money / quota / reservation rules have a test that fails on the defect and runs through the PRODUCTION path (the real
+     async or batch path, real config switches), not only the dev shortcut.
+B15. Test seeds carry every column the code keys on (e.g. provider AND model, tenant AND kind), so a lookup cannot pass on a
+     partial match.

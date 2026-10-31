@@ -196,6 +196,12 @@ Good to know: parallel pairs save time, not tokens (two sessions use quota at on
 is an owner decision recorded at setup; an integration gate run by the orchestrator is the first time A and B are tested together,
 and the reviewer is told to judge their interactions.
 
+**Bigger waves and a shared stack.** For a large independent set of work, up to 4 lanes run on worktree tracks, each with its
+own pairs, merged with a merge gate (`references/parallel-lanes.md`). When several trees share one container stack, the backend
+`pre-shared-stack` gate snippet gives the unit tests their own test database, caps heavy phases with machine-wide run slots,
+holds a fair (FIFO) stack lock only around E2E, and prints a DB sentinel line that names a restart or killed connections instead
+of letting them look like code faults (`references/shared-stack.md`).
+
 ## How a cycle works
 
 ```
@@ -316,7 +322,9 @@ on exit (and falls back to a folder in the plan dir when the system temp is not 
 - **A new stack**: add `profiles/<name>/` with `defaults.json` and any of `coding-rules.md`, `checkpoints.md`, `performance-checklist.md`,
   `self-check.md`, `gate-hooks.md` (missing files are skipped). `generic` is always the base.
 - **More gates**: drop a snippet into `profiles/<stack>/gate-snippets/` (it is sourced by `check.sh`; `pre-*`
-  snippets run before the build).
+  snippets run before the build). A snippet may define `gate_before_tests` / `gate_after_tests` / `gate_before_e2e` /
+  `gate_after_e2e` / `gate_on_exit`, and name support files on a `# requires-helpers:` line (copied from
+  `profiles/<stack>/helpers/` into the plan's `helpers/`).
 
 ## Layout of this skill
 
@@ -334,6 +342,9 @@ on exit (and falls back to a folder in the plan dir when the system temp is not 
 | `scripts/worktree.py` | Parallel-pair worktrees: add, snapshot, land, remove, list |
 | `scripts/doctor.py` | Health check of the install and a plan folder |
 | `references/parallel-pairs.md` | When and how a pair runs in parallel worktrees |
+| `references/parallel-lanes.md` | A wave of up to 4 lanes on worktree tracks; E2E frequency |
+| `references/shared-stack.md` | Several trees, one container stack: lock narrowing, test DB, run slots, sentinel, FIFO lock |
+| `profiles/backend/helpers/` | `stack_lock.sh`, `run_slot.sh` (+ self-tests), `shared-stack.env`, test-DB compose, `testdb_conn.sh` |
 | `tests/` | Unit and end-to-end tests (`python3 -m unittest discover -s tests`) |
 
 ## License

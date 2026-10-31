@@ -22,8 +22,9 @@ All of these must hold. If one fails, run the pair sequentially (the default beh
    so unreviewed work in the main tree would be invisible to them. (Writing the next briefs while a review runs is
    still fine; only the dispatch waits for the commit.)
 4. **No shared runtime resource**: the two batches' tests and live checks do not use the same port, database, container
-   stack or emulator. If they must, enable the `pre-stack-lock` gate snippet (serialises gates) and give each brief its own ports
-   in the `{{PORTS_AND_SERVICES}}` line, or run sequentially.
+   stack or emulator. If they must, follow `shared-stack.md` (backend: the `pre-shared-stack` snippet — test-only DB, run
+   slots, a FIFO lock around E2E only; or the simpler `pre-stack-lock`) and give each brief its own ports in the
+   `{{PORTS_AND_SERVICES}}` line, or run sequentially.
 5. The worktree **setup command** is known (`WORKTREE_SETUP_CMD`: `npm ci`, `flutter pub get`, …), or the stack needs none.
    Without installed dependencies a fresh worktree cannot build.
 6. Both lanes have quota for two simultaneous sessions. When one lane would have to fall back mid-run, say so to the owner.
@@ -91,5 +92,6 @@ fallback in the ledger. Nothing is lost: B's WIP branch can be inspected until i
   checkout never see them. Delete leftovers with `worktree.py remove --all --force`; `doctor.py` and `status.py` list them.
 - The WIP branches `es/<plan-lowercase>/<id-lowercase>` are local scratch. They are never pushed and never merged; only the landed diff is committed.
 - Do not stash, checkout or reset in the main tree while worktrees exist. The existing git-safety rules apply unchanged.
+- More than two batches at once (a wave of up to 4 lanes on worktree tracks): `parallel-lanes.md`.
 - This is not the long-lived "worktree track" of `git-and-gates.md` (a branch worked on for days with merge gates): a parallel pair lives
   for one batch and lands as an uncommitted diff.

@@ -69,8 +69,9 @@ owner in chat; `replace` = copy the owner's own file (`CODING_RULES.file`) as co
 coding-rules.md, so the repo's rules file is the only source. Every mode except `repo` appends
 `<PLAN_DIR>/coding-rules.md` to `RULES_FILES`.
 
-`EXTRA_GATES`: names of `profiles/<p>/gate-snippets/<name>.sh` to copy into `gates.d/`. Backend: `layering`,
-`doc-comments`, `pre-stack-lock`, `suite-parse`. Mobile: `core-imports-features`, `generated-up-to-date`,
+`EXTRA_GATES`: names of `profiles/<p>/gate-snippets/<name>.sh` to copy into `gates.d/` (plus the files a snippet names on
+its `# requires-helpers:` line, copied into `helpers/`). Backend: `layering`, `doc-comments`, `pre-stack-lock` or
+`pre-shared-stack` (one of the two; `shared-stack.md`), `suite-parse`. Mobile: `core-imports-features`, `generated-up-to-date`,
 `preview-isolation`. Snippets named `pre-*` run before the build; the rest run before e2e.
 
 Validation: `PLAN_ID` must be UPPER_SNAKE (`[A-Z][A-Z0-9_]{1,63}`), because it names a folder and branches. Keys that are not in

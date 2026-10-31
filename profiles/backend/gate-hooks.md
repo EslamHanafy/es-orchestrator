@@ -16,9 +16,14 @@ Extra gates worth adding (as numbered blocks before the e2e block):
 - **Doc comments on added declarations**: for languages whose rules require them (e.g. `///` in C#, KDoc, JSDoc).
 - **Database required tests**: an env flag that makes DB-gated tests fail instead of soft-skipping, so concurrency and locking
   claims really run.
-- **Stack lock**: if several worktrees share one container stack, take a lock file for the whole gate run.
+- **Shared stack** (several worktrees, one container stack): `pre-shared-stack` — unit tests on a test-only database, run slots
+  (cap 2, slot before lock), a FIFO stack lock around E2E only, a DB sentinel line, a job-scheduler lock pre-check, a
+  health-waited restore. Settings in `helpers/shared-stack.env`; rules in `references/shared-stack.md`. Without a test
+  database: `pre-stack-lock` (locks from the tests on, build/format unlocked).
 - **Suite parse check**: `bash -n` on every e2e suite, so a syntax error cannot make a suite skip silently.
 
-E2E_CMD pattern: `docker compose up -d --build <svc> && ./tests/run_tests.sh $E2E`. Each suite prints `NN: <k> checks`.
+E2E_CMD pattern: `./tests/run_tests.sh $E2E`; each suite prints `NN: <k> checks`. With `pre-shared-stack` the snippet starts
+and restores the app (`SS_E2E_UP` / `SS_E2E_RESTORE`: NAMED services + `--no-deps` + `--wait`), so E2E_CMD only runs suites.
+Without it: `docker compose up -d --build --no-deps --wait <svc> && ./tests/run_tests.sh $E2E` — never a bare `up`.
 Better AST scanners than fnlen.py: Roslyn analyzers / a small Roslyn script (.NET), `eslint max-lines-per-function` (TS),
 detekt `LongMethod` (Kotlin), `gocyclo`/`funlen` (Go), ruff `PLR0915` (Python).

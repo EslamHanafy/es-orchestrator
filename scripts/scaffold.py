@@ -145,15 +145,26 @@ def coding_rules(answers: dict, profiles: list, repo: Path) -> str:
     return "\n\n".join(part for part in parts if part) + "\n"
 
 
+HELPERS_LINE = re.compile(r"^# requires-helpers:(.*)$", re.MULTILINE)
+
+
 def gate_snippets(answers: dict, profiles: list) -> dict:
-    """Map gates.d/<name>.sh to the snippet text for every EXTRA_GATES entry found in the chosen profiles."""
+    """Map gates.d/<name>.sh to the snippet text for every EXTRA_GATES entry found in the chosen profiles, plus
+    helpers/<file> for every file a snippet names on its `# requires-helpers:` line (from the same profile's helpers/)."""
     found = {}
     for name in answers.get("EXTRA_GATES", []):
         hits = [PROFILES / p / "gate-snippets" / f"{name}.sh" for p in profiles]
         hit = next((h for h in hits if h.is_file()), None)
         if hit is None:
             sys.exit(f"EXTRA_GATES: no snippet '{name}' in profiles {', '.join(profiles)}")
-        found[f"gates.d/{name}.sh"] = read(hit)
+        text = read(hit)
+        found[f"gates.d/{name}.sh"] = text
+        for line in HELPERS_LINE.findall(text):
+            for helper in line.split():
+                source = hit.parent.parent / "helpers" / helper
+                if not source.is_file():
+                    sys.exit(f"EXTRA_GATES: snippet '{name}' needs helpers/{helper}, which {hit.parent.parent.name} lacks")
+                found[f"helpers/{helper}"] = read(source)
     return found
 
 
@@ -299,9 +310,11 @@ def main():
     for name, raw in files.items():
         if args.only and name != args.only:
             continue
-        text = substitute(raw, values, shell=name == "check.sh")
+        # Helpers are copied verbatim (they are project-edited settings and libraries, not templates).
+        text = raw if name.startswith("helpers/") else substitute(raw, values, shell=name == "check.sh")
         leftovers += unfilled(name, text, setup_keys)
         by_hand += hand_fill(name, text)
+        (plan_dir / name).parent.mkdir(parents=True, exist_ok=True)
         (written if write_file(plan_dir / name, text, args.force or bool(args.only)) else skipped).append(name)
 
     if not args.only:

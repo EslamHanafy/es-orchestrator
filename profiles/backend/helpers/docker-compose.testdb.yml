@@ -1,0 +1,48 @@
+# docker-compose.testdb.yml — test-only PostgreSQL for the unit/integration gate (es-orchestrator backend profile)
+# Its OWN compose project, port and connection budget, so a unit gate never shares (or recreates) the stack's database.
+# The gate starts it with `up -d --no-recreate --wait` from the MAIN tree's copy (pre-shared-stack snippet); values come from
+# the environment (helpers/shared-stack.env), the password from a generated, gitignored file.
+# Edit: the project name, the image (the SAME engine and version as the stack's database) and the container name.
+name: myproject_testdb
+
+services:
+  testdb:
+    image: postgres:18-alpine
+    container_name: myproject_testdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SS_TESTDB_USER:?}
+      POSTGRES_PASSWORD: ${SS_TESTDB_PASSWORD:?the gate exports it from the generated password file}
+      POSTGRES_DB: postgres
+    command:
+      - "postgres"
+      # Disposable data: durability off makes CREATE DATABASE + migrations much faster.
+      - "-c"
+      - "fsync=off"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "full_page_writes=off"
+      # Sized to the slot cap: ES_RUN_SLOTS gates × their pools + headroom for psql and the health probe.
+      - "-c"
+      - "max_connections=${SS_TESTDB_MAX_CONNECTIONS:?}"
+      - "-c"
+      - "shared_buffers=128MB"
+      # Planner settings IDENTICAL to the stack's database: without them EXPLAIN-based tests saw sequential scans.
+      - "-c"
+      - "random_page_cost=${SS_TESTDB_RANDOM_PAGE_COST:?}"
+      - "-c"
+      - "effective_cache_size=${SS_TESTDB_EFFECTIVE_CACHE_SIZE:?}"
+    ports:
+      - "127.0.0.1:${SS_TESTDB_PORT:?}:5432"
+    volumes:
+      # A named volume, not tmpfs: dozens of test databases plus WAL would come out of the Docker VM's memory.
+      - testdb-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  testdb-data:
