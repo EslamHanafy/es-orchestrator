@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+### Added
+- README section "Design gate (new and existing plans)" with the six steps to add the gate to a plan created before 1.3.0, two
+  cheat-sheet prompts, and the same retrofit steps in `references/design-gate.md`.
+- `scaffold.py --upgrade-static` now also adds `design-challenger-prompt.md` to an existing plan folder (test added).
+
 ## 1.3.0
 
 Design gate, after a real case: a planner, a plan reviewer and three review cycles approved a 3-second poll timer, and a

@@ -199,6 +199,13 @@ class ScaffoldTests(Base):
         out = script("scaffold.py", "--upgrade-static", "--repo", self.root, "--plan-id", "DEMO_PLAN")
         self.assertIn("added: scan_added.py", out.stdout)
 
+    def test_upgrade_static_adds_design_challenger_prompt(self):
+        _, plan = self.repo.scaffold()
+        (plan / "design-challenger-prompt.md").unlink()
+        out = script("scaffold.py", "--upgrade-static", "--repo", self.root, "--plan-id", "DEMO_PLAN")
+        self.assertIn("added: design-challenger-prompt.md", out.stdout)
+        self.assertTrue((plan / "design-challenger-prompt.md").exists())
+
     def test_reviewer_agent_scope(self):
         out, _ = self.repo.scaffold()
         self.assertIn(".claude/agents/demo-reviewer.md", out.stdout)

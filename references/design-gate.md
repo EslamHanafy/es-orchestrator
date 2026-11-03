@@ -46,9 +46,23 @@ Red flags that force the question "is there a standard way?":
 - a component whose only job is to cover another design choice;
 - a header, limit or security setting relaxed to make a feature work.
 
+## Adding the gate to an existing plan (created before 1.3.0)
+
+Triggered by "add the design gate to <PLAN_ID>" (steps 1–4), then "run the design gate on <phase or task>" (step 5).
+1. The skill is updated (the owner runs `npx skills update es-orchestrator` or `git pull`).
+2. `scaffold.py --upgrade-static --repo . --plan-id <ID>` adds `design-challenger-prompt.md` to the plan folder.
+3. Add the RULE CHECKLIST line from `templates/ORCHESTRATOR_HANDOFF.md` (line 15) to the plan's handoff with the next free number and the
+   owner's name, and a dated row in the OWNER DECISIONS table. Upgrades never touch the handoff, so the orchestrator edits it (backup first).
+4. Sort every phase/task not yet committed into **gate** (new design, user-facing flow, design change) or **mechanical**; write the list
+   into the handoff's NEXT and tell the owner in plain words.
+5. Before the survey or briefs of each **gate** item: parts (a)–(c) above, then the owner's plain-words approval; changes go into the
+   spec/plan as a dated "Update" note and get a fresh design review.
+6. Finished phases are not re-opened by default; on the owner's request, run only the challenger against a shipped flow and turn
+   differences into backlog items or a small fix plan.
+
 ## Where it plugs in
 
-- `plan` mode step 0 (`run-modes.md`), before surveys and briefs of a phase that the gate covers.
+- `plan` mode step 1b (`run-modes.md`), before surveys and briefs of a phase that the gate covers.
 - Setup: if the plan file does not exist yet, the gate runs inside its writing (superpowers:writing-plans or the owner's own process)
   before the plan is approved.
 - RULE CHECKLIST line in the handoff (templates/ORCHESTRATOR_HANDOFF.md).

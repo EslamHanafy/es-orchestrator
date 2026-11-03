@@ -3,7 +3,7 @@ name: es-orchestrator
 description: >-
   Orchestrator-only delivery workflow for any project and stack. Claude writes surveys, briefs and rulings; cheap implementer lanes write the code in ~30-minute batches (pairs, optionally in parallel git worktrees); a fresh reviewer agent reads every changed line; the owner gets the full report before every commit; a handoff file and a progress ledger carry state across sessions. Use it to set up the workflow, to continue a plan ("continue as orchestrator", "read the handoff END STATE", or any repo with .superpowers/sdd/*/ORCHESTRATOR_HANDOFF.md), to end a session with an END STATE block, or to run ONE step only: "plan only", "orchestrate only", "review only", "commit only" or the "full cycle".
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
 ---
 
 # es-orchestrator
@@ -48,6 +48,7 @@ Built for Claude Code. It uses these tools; when one is missing, use the fallbac
 | A new project/plan set up | **Setup** (quick path or full interview) | `references/setup-flow.md` |
 | Only the planning: surveys, rulings, batch order, briefs | **`plan`** | `references/run-modes.md`, `references/design-gate.md` |
 | A new design, plan or design change to approve | **`plan`** (design gate first) | `references/design-gate.md` |
+| Add the design gate to an older plan | **`plan`** (retrofit steps) | `references/design-gate.md` § Adding the gate to an existing plan |
 | Only the implementation: dispatch the pair from ready briefs (sequential or parallel) | **`orchestrate`** | `references/run-modes.md`, `references/parallel-pairs.md` |
 | A large independent set of batches as up to 4 parallel lanes (a wave) | **`plan`**, then **`full`** per lane | `references/parallel-lanes.md` |
 | Only a review of a finished pair, plus the owner report | **`review`** | `references/run-modes.md` |

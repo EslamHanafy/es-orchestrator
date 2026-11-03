@@ -20,6 +20,7 @@ included). The coding rules ship as defaults that you keep, edit or replace duri
 - [Run modes: one step or the whole cycle](#run-modes-one-step-or-the-whole-cycle)
 - [Parallel pairs (git worktrees)](#parallel-pairs-git-worktrees)
 - [How a cycle works](#how-a-cycle-works)
+- [Design gate (new and existing plans)](#design-gate-new-and-existing-plans)
 - [Prompt cheat sheet](#prompt-cheat-sheet)
 - [What gets generated](#what-gets-generated)
 - [Implementer lanes](#implementer-lanes)
@@ -231,6 +232,46 @@ Why it is built this way:
   restartable.
 - Big batches overwhelm reviews, so batches take ≈30 minutes, run as pairs, with one review per pair.
 
+## Design gate (new and existing plans)
+
+A planner agent and a reviewer agent that share one framing approve the same mistake: reviewers check whether a design is
+consistent, rarely whether the approach is right. The design gate runs before any design, plan or design change is approved
+(full rules: `references/design-gate.md`):
+
+1. **Prior art** — how 2–3 known products or published patterns solve the problem, with sources; at least 2 alternatives with
+   trade-offs; the chosen and rejected options with reasons.
+2. **Unanchored challenger** — a fresh strong-model agent gets only the problem, the constraints and your goals (never the design)
+   and proposes its own (`templates/design-challenger-prompt.md`). Every difference is answered in the design.
+3. **Flow walkthrough** — for every user action: the requests and database work it causes, what the user sees, every unhappy path.
+   You approve the design from a plain-words summary of this walkthrough, not only from the technical spec.
+4. **Cause or symptom** — every fix a review adds is labelled; a workaround goes to you, never ruled "minor". Red flags: poll timers,
+   sleeps and retries, hidden frames, relaxed headers or limits, a part that only covers another design choice.
+
+**New plan:** nothing to do. Setup and `plan` mode run the gate before the first survey of a phase that brings a design or a
+user-facing flow (`plan` step 1b).
+
+**Existing plan created before 1.3.0 — add the gate in six steps:**
+
+1. Update the skill: `npx skills update es-orchestrator` (or `git pull` in the skill folder).
+2. Copy the challenger template into the plan folder:
+   `python3 <skill dir>/scripts/scaffold.py --upgrade-static --repo . --plan-id <PLAN_ID>` (prints `added: design-challenger-prompt.md`).
+3. Add the gate to the plan's rule checklist: copy line 15 ("DESIGN GATE …") of `templates/ORCHESTRATOR_HANDOFF.md` into the RULE
+   CHECKLIST of `.superpowers/sdd/<PLAN_ID>/ORCHESTRATOR_HANDOFF.md` with the next free number (replace `{{OWNER_NAME}}`), and record a
+   dated row in the OWNER DECISIONS table ("design gate applies from <date>"). Your handoff is never overwritten by an upgrade, so this
+   step is manual.
+4. Sort what is left of the plan. For each phase or task not yet committed, mark it **gate** (it brings a new design, a user-facing flow
+   or a design change) or **mechanical** (renames, package bumps, proven deletions — only the cause-or-symptom rule applies). Put the list
+   in the handoff's NEXT.
+5. Run the gate on the first **gate** item before its survey or briefs: add the prior-art section to its spec, fill and dispatch the
+   challenger (its DO-NOT-OPEN list names the spec, the plan, `.superpowers/` and any code already written for that design), write the flow
+   walkthrough, and get your approval in plain words. Changes go into the spec and plan as a dated "Update" note, followed by a fresh
+   design review. Repeat for each **gate** item when it comes up.
+6. Optional, for phases already finished: run only the challenger against a shipped flow you are unsure about. Differences become
+   backlog items or a small fix plan, not silent rewrites.
+
+Say: `Use es-orchestrator: add the design gate to <PLAN_ID>` (steps 1–4) and `Use es-orchestrator: run the design gate on <phase or
+task>` (step 5).
+
 ## Prompt cheat sheet
 
 | Goal | Say |
@@ -240,6 +281,8 @@ Why it is built this way:
 | Continue everything | `Use es-orchestrator to continue <PLAN_ID> as ORCHESTRATOR` |
 | Planning only | `Use es-orchestrator in plan mode` |
 | Planning for one phase | `Use es-orchestrator: plan only, phase 3` |
+| Add the design gate to an older plan | `Use es-orchestrator: add the design gate to <PLAN_ID>` |
+| Design gate on one phase or change | `Use es-orchestrator: run the design gate on <phase or task>` |
 | Implement only | `Use es-orchestrator: orchestrate only` |
 | Review only | `Use es-orchestrator: review only B14+B15` |
 | Commit only | `Use es-orchestrator: commit only` |
@@ -255,7 +298,7 @@ Why it is built this way:
   review-checklist.md          mandatory review checkpoints (generic + stack)
   performance-checklist.md     performance groups for the stack
   review-lessons-self-check.md implementer self-check; grows with every review finding
-  brief / survey / review-full / review-light templates, reviewer-agent.md, NEXT_SESSION_PROMPT.md
+  brief / survey / design-challenger / review-full / review-light templates, reviewer-agent.md, NEXT_SESSION_PROMPT.md
   check.sh + fnlen.py + locale_parity.py + allow-lists + forbidden-patterns.txt + gates.d/
   runs/<batch>/                START marker, result.json, REPORT.md, gate.log, live-checks.log
 ```
@@ -289,7 +332,8 @@ whose pid is gone).
 **Upgrading a plan folder created by an older version:** update the skill (`npx skills update es-orchestrator`), then add the new
 helper scripts with `scaffold.py --upgrade-static --repo . --plan-id <PLAN_ID>`. Your `check.sh` is never overwritten (it holds your
 gate commands); merge the new timeouts, cleanup and secret scan from `templates/check.sh`, or regenerate it with your original
-answers (`--only check.sh --force`).
+answers (`--only check.sh --force`). Since 1.3.0, also add the design gate to the plan: see
+[Design gate (new and existing plans)](#design-gate-new-and-existing-plans).
 
 **What the gate (`check.sh`) does:** secrets-tracked check, migrations untouched, build, lint, format on changed files, tests against
 known failures, function length, forbidden patterns and secrets in **added lines** (a rule named `~name` ignores strings and

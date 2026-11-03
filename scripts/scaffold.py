@@ -30,7 +30,8 @@ COPY_FILES = ["ORCHESTRATOR_HANDOFF.md", "progress.md", "brief-template.md", "su
               "review-full-template.md", "review-light-template.md", "review-lessons-self-check.md",
               "NEXT_SESSION_PROMPT.md", "reviewer-agent.md", "check.sh", "fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt",
               "fnlen-allow.txt", "forbidden-allow.txt", "forbidden-patterns.txt", "known-test-failures.txt"]
-STATIC_FILES = ["fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt"]
+# Files copied verbatim by --upgrade-static: no setup placeholders (the challenger prompt only has per-use ones, filled at each use).
+STATIC_FILES = ["fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt", "design-challenger-prompt.md"]
 EXECUTABLE = {"check.sh", "fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py"}
 # Files whose <angle> fields and descriptive {{NAME — hint}} placeholders are filled by hand during setup.
 HAND_FILL_FILES = {"ORCHESTRATOR_HANDOFF.md", "progress.md", "NEXT_SESSION_PROMPT.md"}
@@ -246,7 +247,7 @@ def report_environment(repo: Path, plan_dir: Path, values: dict):
 
 
 def upgrade_static(repo: Path, plan_id: str, force: bool):
-    """Add the placeholder-free helper files (new or changed in a skill update) to an existing plan folder."""
+    """Add the helper files without setup placeholders (new or changed in a skill update) to an existing plan folder."""
     plan_dir = repo / ".superpowers" / "sdd" / plan_id
     if not plan_dir.is_dir():
         sys.exit(f"plan folder not found: {plan_dir}")
