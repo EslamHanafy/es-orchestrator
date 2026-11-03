@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+Design gate, after a real case: a planner, a plan reviewer and three review cycles approved a 3-second poll timer, and a
+"minor" review fix added a hidden-iframe download to cover a design gap. The owner caught both in one message once the flow
+was explained in plain words.
+
+### Added
+- `references/design-gate.md`: before any design, plan or design change is approved — (a) prior art with sources and ≥ 2
+  alternatives, (b) an unanchored challenger agent that never sees the design, (c) a per-user-action flow walkthrough the owner
+  approves in plain words, (d) every review fix labelled cause or symptom; workarounds go to the owner.
+- `templates/design-challenger-prompt.md` (copied by `scaffold.py`; a per-use template, so `doctor.py` does not flag its placeholders).
+- `plan` mode step 1b, a setup-flow note, a RULE CHECKLIST line (15) in the handoff template, a SKILL.md non-negotiable, and the
+  cause-or-symptom rule in the fix policy and the full review template.
+
 ## 1.2.2
 
 Fixes from the second, third and fourth fresh reviews (of 1.2.1 and two 1.2.2 drafts). Regression tests cover the

@@ -3,7 +3,7 @@ name: es-orchestrator
 description: >-
   Orchestrator-only delivery workflow for any project and stack. Claude writes surveys, briefs and rulings; cheap implementer lanes write the code in ~30-minute batches (pairs, optionally in parallel git worktrees); a fresh reviewer agent reads every changed line; the owner gets the full report before every commit; a handoff file and a progress ledger carry state across sessions. Use it to set up the workflow, to continue a plan ("continue as orchestrator", "read the handoff END STATE", or any repo with .superpowers/sdd/*/ORCHESTRATOR_HANDOFF.md), to end a session with an END STATE block, or to run ONE step only: "plan only", "orchestrate only", "review only", "commit only" or the "full cycle".
 metadata:
-  version: "1.2.2"
+  version: "1.3.0"
 ---
 
 # es-orchestrator
@@ -46,7 +46,8 @@ Built for Claude Code. It uses these tools; when one is missing, use the fallbac
 | The user wants… | Mode | Read |
 | --- | --- | --- |
 | A new project/plan set up | **Setup** (quick path or full interview) | `references/setup-flow.md` |
-| Only the planning: surveys, rulings, batch order, briefs | **`plan`** | `references/run-modes.md` |
+| Only the planning: surveys, rulings, batch order, briefs | **`plan`** | `references/run-modes.md`, `references/design-gate.md` |
+| A new design, plan or design change to approve | **`plan`** (design gate first) | `references/design-gate.md` |
 | Only the implementation: dispatch the pair from ready briefs (sequential or parallel) | **`orchestrate`** | `references/run-modes.md`, `references/parallel-pairs.md` |
 | A large independent set of batches as up to 4 parallel lanes (a wave) | **`plan`**, then **`full`** per lane | `references/parallel-lanes.md` |
 | Only a review of a finished pair, plus the owner report | **`review`** | `references/run-modes.md` |
@@ -149,6 +150,10 @@ lines into `archive-*-through-s<N>.md`, so the handoff stays short. Give the own
 - **Batches take about BATCH_MINUTES (default 30).** Split before dispatch. Ask the owner if a batch truly cannot
   be split.
 - **Report wording in plain words.** Never send bare checklist ids ("C17") to the owner.
+- **Design gate before any design or plan is approved.** Prior art with sources and ≥ 2 alternatives; an unanchored
+  challenger agent that never sees our design; a per-user-action flow walkthrough the owner approves in plain words; every
+  review fix labelled "cause" or "symptom" (workarounds go to the owner). A planner and a reviewer that share one framing
+  approve the same mistake (`references/design-gate.md`).
 - **Tooling is code.** Gate scripts, helpers, compose and proxy changes go one step at a time with a proof log, then a fresh
   strong-model review of the tooling diff before a gate relies on them. Extras stay only with a measured payoff.
 - **Never let a shared resource fail as a code fault.** Several trees on one stack follow `references/shared-stack.md`
@@ -156,9 +161,9 @@ lines into `archive-*-through-s<N>.md`, so the handoff stays short. Give the own
 
 ## Files in this skill
 
-- `references/` — setup-flow, answers-schema, run-modes, parallel-pairs, parallel-lanes, shared-stack, session-loop,
+- `references/` — design-gate, setup-flow, answers-schema, run-modes, parallel-pairs, parallel-lanes, shared-stack, session-loop,
   end-of-session, lanes, pairing-and-review, git-and-gates, owner-decisions.
-- `templates/` — copied into the project by `scaffold.py`: handoff, progress, briefs, review prompts, self-check,
+- `templates/` — copied into the project by `scaffold.py`: handoff, progress, briefs, design-challenger prompt, review prompts, self-check,
   decisions table, next-session prompt, reviewer agent, gate skeleton and its helpers (`run_timeout.py`,
   `scan_added.py`, `fnlen.py`, `locale_parity.py`), allow-lists, secret patterns.
 - `profiles/{generic,backend,mobile,web}/` — default coding rules, review checkpoints, performance checklist, extra

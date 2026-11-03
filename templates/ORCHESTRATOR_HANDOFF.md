@@ -62,6 +62,9 @@ REPORT WORDING: never bare checklist ids. Name each line in plain words ("Run re
     other, and no shared port / database / container is used (or the stack lock is on). Worktrees are removed after the commit.
 14. A single-step mode (plan / orchestrate / review / commit) does ONLY its stage, records it with `status.py --set-stage` and names the
     next mode. `commit` needs the review report's OWNER_REPORT_SENT marker.
+15. DESIGN GATE before any design, plan or design change goes to {{OWNER_NAME}} and before its briefs (`design-gate.md`): prior art with sources
+    + ≥ 2 alternatives; an unanchored challenger that never sees our design (every difference answered); a per-user-action flow walkthrough
+    {{OWNER_NAME}} approves in plain words; every review fix labelled cause or symptom — a workaround goes to {{OWNER_NAME}}, never "minor".
 
 ## Workflow (binding)
 **Dispatch** (`W={{PLAN_DIR}}`; always `run_in_background`; never poll, wait for the notification):

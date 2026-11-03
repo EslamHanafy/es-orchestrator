@@ -54,6 +54,9 @@ Entry check: `$W` exists, the plan file is readable, and the next phase or batch
 target the owner gave).
 
 1. Resume and status (`session-loop.md` §1–2). Give the owner done/left % and the open OWNER-REVIEW items.
+1b. **Design gate** (`design-gate.md`) when the phase brings a new design, a user-facing flow or a design change and the
+   gate has not run for it: prior art, the unanchored challenger, the flow walkthrough the owner approves in plain words.
+   No survey or brief for that phase before the owner's approval.
 2. If the phase has no survey yet, dispatch the read-only survey (`survey-brief-template.md`) on the helper model.
    Read it, then append ORCHESTRATOR RULINGS and BATCH ORDER (each batch marked MECHANICAL or JUDGEMENT, paired
    where the file sets are disjoint).

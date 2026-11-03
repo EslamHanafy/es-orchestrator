@@ -38,7 +38,8 @@ Round 1: identity and scope
   (walk the sections with the owner and change what they say, then write the result) / **Replace with our own**
   (the owner gives a file path or pastes the rules) / **Repo rules file only** (no coding-rules.md). If the repo
   already has a rules file, say so, and recommend defaults + repo file together (the repo file wins on conflicts).
-- Plan file path (phases/tasks). If none exists, offer superpowers:writing-plans first.
+- Plan file path (phases/tasks). If none exists, offer superpowers:writing-plans first, and run the design gate
+  (`design-gate.md`) inside it before the plan is approved.
 - Rules file(s) that are the source of truth (AGENTS.md, CLAUDE.md, CONTRIBUTING.md).
 
 Round 2: gates

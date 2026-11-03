@@ -26,7 +26,7 @@ PROFILES = SKILL / "profiles"
 PLACEHOLDER = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
 PLAN_ID_RE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 # Templates copied as-is into the plan folder (decisions-table.md is embedded in the handoff instead).
-COPY_FILES = ["ORCHESTRATOR_HANDOFF.md", "progress.md", "brief-template.md", "survey-brief-template.md",
+COPY_FILES = ["ORCHESTRATOR_HANDOFF.md", "progress.md", "brief-template.md", "survey-brief-template.md", "design-challenger-prompt.md",
               "review-full-template.md", "review-light-template.md", "review-lessons-self-check.md",
               "NEXT_SESSION_PROMPT.md", "reviewer-agent.md", "check.sh", "fnlen.py", "locale_parity.py", "run_timeout.py", "scan_added.py", "secret-patterns.txt",
               "fnlen-allow.txt", "forbidden-allow.txt", "forbidden-patterns.txt", "known-test-failures.txt"]

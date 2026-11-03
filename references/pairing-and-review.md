@@ -64,6 +64,10 @@ the orchestrator's `integration-gate.log`, which the reviewer verifies. The revi
 - Fix round → same implementer lane resumed, then a NEW fresh reviewer given the previous report. A continued
   reviewer (SendMessage, cycle 2+) re-runs only what the fix touched.
 - Every issue in a touched file gets fixed before the commit, including old code in that file.
+- Cause or symptom: every fix the reviewer makes or proposes says "fixes the cause" or "works around a symptom because …".
+  A workaround (and any red flag from `design-gate.md` (d): poll timers, sleeps/retries, hidden frames, relaxed headers or
+  limits, a part that only covers another design choice) is handed to the orchestrator, who takes it to the owner with the
+  cause-level alternative. The orchestrator never rules a workaround "minor".
 
 ## Money rules need a red test through the production path
 

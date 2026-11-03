@@ -23,7 +23,7 @@ REQUIRED = ("ORCHESTRATOR_HANDOFF.md", "progress.md", "check.sh", "fnlen.py", "l
             "review-lessons-self-check.md", "brief-template.md", "review-full-template.md", "NEXT_SESSION_PROMPT.md",
             "config.json")
 PER_BATCH_FILES = {"brief-template.md", "survey-brief-template.md", "review-full-template.md", "review-light-template.md",
-                   "reviewer-agent.md"}
+                   "reviewer-agent.md", "design-challenger-prompt.md"}
 SETUP_PLACEHOLDER = re.compile(r"\{\{[A-Z][A-Z0-9_]*\}\}")
 HAND_FIELD = re.compile(r"\{\{[A-Z_]+ — [^}]*\}\}")
 

@@ -57,6 +57,9 @@ DO:
      touch ~15+ files. Write {{PLAN_DIR}}/{{BATCH_ID}}-fix1-brief.md in brief-template.md format, DECISIONS NEEDED at the top
      with your recommendation.
    - Never run git stash/checkout/restore/reset/add/commit. Format explicit files only.
+   - CAUSE OR SYMPTOM: label every fix and every handed-back finding "fixes the cause" or "works around a symptom because …".
+     Do NOT apply a workaround yourself, and flag these red flags as design questions: poll timers, sleeps or blind retries,
+     hidden frames or simulated clicks, a relaxed header/limit/security setting, a part that only covers another design choice.
 5. Write {{PLAN_DIR}}/{{BATCH_ID}}-review-report.md in PLAIN WORDS (never bare ids): one line per checkpoint of
    review-checklist.md by its name, one line per performance group by its name, then one line per {{RULES_FILES}} section by its
    title. Each line: ✅ evidence / ❌ finding file:line / ⚠ accepted + reason / NOT RUN + why. Then "Fixed by reviewer"
