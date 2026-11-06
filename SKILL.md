@@ -3,7 +3,7 @@ name: es-orchestrator
 description: >-
   Orchestrator-only delivery workflow for any project and stack. Claude writes surveys, briefs and rulings; cheap implementer lanes write the code in ~30-minute batches (pairs, optionally in parallel git worktrees); a fresh reviewer agent reads every changed line; the owner gets the full report before every commit; a handoff file and a progress ledger carry state across sessions. Use it to set up the workflow, to continue a plan ("continue as orchestrator", "read the handoff END STATE", or any repo with .superpowers/sdd/*/ORCHESTRATOR_HANDOFF.md), to end a session with an END STATE block, or to run ONE step only: "plan only", "orchestrate only", "review only", "commit only" or the "full cycle".
 metadata:
-  version: "1.3.1"
+  version: "1.3.2"
 ---
 
 # es-orchestrator
@@ -120,7 +120,9 @@ the rhythm of `full`. Each single-step mode runs just its stages (`references/ru
 6. **Fresh reviewer** for the pair. Read its report and own the verdict. For a fix round, use the same lane, then
    a NEW reviewer.
 7. **Send the full report file** (SendUserFile) plus a plain-language summary to the owner, then `touch` the pair's
-   OWNER_REPORT_SENT marker.
+   OWNER_REPORT_SENT marker. **Per batch, before its commit — always.** The owner being asleep or away, "continue to the
+   end", a tiny batch, or a project prompt that says "one short chat line per stage" never waives this: stage lines and
+   an end-of-session summary are extras, never replacements.
 8. **Gate freshness**: the gate has passed on HEAD and no source file is newer than the gate log. If either is not
    true, re-run the gate (`references/git-and-gates.md`).
 9. **Commit** with explicit-path staging. Then do the **bookkeeping**: ledger line, LIVE STATUS, plan status line,
@@ -141,6 +143,9 @@ lines into `archive-*-through-s<N>.md`, so the handoff stays short. Give the own
 
 - **No commit before the owner has the full report file and every finding is fixed.** This includes findings in
   old code inside touched files. The owner is the last line of defence and cannot judge from a summary.
+  The report goes out BEFORE each commit even when the owner is away (they read it later, but it must exist in chat
+  at the moment of the commit). Seen failure: an orchestrator read "one short chat line at each stage change" as the
+  whole reporting rule and committed 26 batches without sending a single report — never do this.
 - **A gate pass is not a review.** The reviewer reads every changed line (FULL) or the proofs plus ≥15 sampled
   hunks (LIGHT, mechanical batches only).
 - **Evidence first, no blind re-runs.** Implementers paste gate output verbatim from log files. The reviewer

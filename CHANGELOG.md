@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.2
+
+After a real case: an orchestrator read a project prompt's "one short chat line at each stage change" as the whole reporting
+rule and committed 26 batches without sending a single per-commit report while the owner was away.
+
+### Changed
+- `SKILL.md` step 7 and Non-negotiables: the full report file and summary go to the owner before EVERY commit, also when the
+  owner is asleep or away, said "continue to the end", or the batch is tiny; short stage lines and an end-of-session summary are
+  extras, never replacements.
+
 ## 1.3.1
 
 ### Added
